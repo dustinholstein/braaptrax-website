@@ -172,7 +172,7 @@
         <li>
           <span class="icon">📧</span>
           <span class="label">Email</span>
-          <span class="value">hello@braaptrax.com</span>
+          <span class="value"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="127a777e7e7d5270607373626660736a3c717d7f">[email&#160;protected]</a></span>
         </li>
         <li>
           <span class="icon">💬</span>
@@ -188,7 +188,7 @@
     </div>
 
     <div class="contact-form">
-      <form id="contactForm" action="https://formspree.io/f/YOUR_CONTACT_FORM_ID" method="POST">
+      <form id="contactForm" action="https://formspree.io/f/xbdppbzn" method="POST">
         <div class="form-group">
           <label for="name">Name</label>
           <input type="text" id="name" name="name" placeholder="Your name" required>
@@ -236,7 +236,7 @@
   <p class="footer-copy">© 2025 BraapTrax</p>
 </footer>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
   document.getElementById('contactForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     const btn = document.getElementById('contactSubmit');
@@ -251,16 +251,4 @@
       });
       if (res.ok) {
         this.style.display = 'none';
-        document.getElementById('contactSuccess').style.display = 'flex';
-      } else {
-        btn.textContent = 'Try again';
-        btn.disabled = false;
-      }
-    } catch {
-      btn.textContent = 'Try again';
-      btn.disabled = false;
-    }
-  });
-</script>
-</body>
-</html>
+        document.getElementById('contactSuccess').sty
