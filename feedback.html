@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feedback — BraapTrax</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --orange: #FF6B00;
+    --bg: #0A0A0A;
+    --bg2: #111111;
+    --bg3: #181818;
+    --border: rgba(255,255,255,0.08);
+    --text: #F0EDE8;
+    --muted: #888;
+    --font-display: 'Bebas Neue', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+    --font-mono: 'DM Mono', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); -webkit-font-smoothing: antialiased; }
+
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 60px;
+    background: rgba(10,10,10,0.9); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo { font-family: var(--font-display); font-size: 1.8rem; letter-spacing: 2px; color: var(--orange); text-decoration: none; }
+  .nav-links { display: flex; gap: 2rem; list-style: none; }
+  .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; transition: color 0.2s; }
+  .nav-links a:hover, .nav-links a.active { color: var(--text); }
+
+  .page-header { padding: 9rem 2rem 4rem; max-width: 1100px; margin: 0 auto; }
+  .page-label { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 3px; text-transform: uppercase; color: var(--orange); margin-bottom: 1rem; }
+  .page-title { font-family: var(--font-display); font-size: clamp(3rem, 8vw, 5rem); letter-spacing: 2px; line-height: 1; margin-bottom: 1rem; }
+  .page-sub { color: var(--muted); font-weight: 300; max-width: 500px; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 0 2rem 6rem; }
+
+  /* REVIEWS GRID */
+  .reviews-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .reviews-header h2 { font-family: var(--font-display); font-size: 2rem; letter-spacing: 2px; }
+
+  .reviews-count { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); }
+
+  .reviews-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin-bottom: 5rem;
+  }
+
+  .review-card {
+    background: var(--bg2);
+    padding: 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .review-stars {
+    display: flex;
+    gap: 3px;
+  }
+
+  .star { color: var(--orange); font-size: 13px; }
+  .star.empty { color: var(--border); }
+
+  .review-text {
+    font-size: 0.9rem;
+    line-height: 1.75;
+    font-weight: 300;
+    color: var(--text);
+    flex: 1;
+  }
+
+  .review-text::before { content: '"'; color: var(--orange); font-size: 1.4rem; line-height: 0; vertical-align: -0.3em; margin-right: 2px; }
+  .review-text::after { content: '"'; color: var(--orange); font-size: 1.4rem; line-height: 0; vertical-align: -0.3em; margin-left: 2px; }
+
+  .review-author {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .review-avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: rgba(255,107,0,0.12);
+    border: 1px solid rgba(255,107,0,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--orange);
+    flex-shrink: 0;
+  }
+
+  .review-name { font-size: 0.85rem; font-weight: 500; }
+  .review-meta { font-size: 0.72rem; color: var(--muted); }
+
+  .empty-state {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4rem 2rem;
+    text-align: center;
+    margin-bottom: 5rem;
+  }
+
+  .empty-state .icon { font-size: 2.5rem; margin-bottom: 1rem; }
+  .empty-state h3 { font-family: var(--font-display); font-size: 2rem; letter-spacing: 2px; margin-bottom: 0.75rem; }
+  .empty-state p { color: var(--muted); font-weight: 300; max-width: 400px; margin: 0 auto; font-size: 0.9rem; }
+
+  /* SUBMIT FORM */
+  .submit-section {
+    border-top: 1px solid var(--border);
+    padding-top: 4rem;
+  }
+
+  .submit-section h2 { font-family: var(--font-display); font-size: 2.5rem; letter-spacing: 2px; margin-bottom: 0.5rem; }
+  .submit-section > p { color: var(--muted); font-weight: 300; margin-bottom: 2.5rem; font-size: 0.95rem; }
+
+  .feedback-form { max-width: 680px; }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } .nav-links { display: none; } }
+
+  .form-group { margin-bottom: 1.25rem; }
+
+  label { display: block; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 0.5rem; font-weight: 500; }
+
+  input, textarea {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    font-weight: 300;
+    padding: 0.85rem 1rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus, textarea:focus { border-color: var(--orange); }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
+  textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
+
+  .star-rating { display: flex; gap: 6px; margin-top: 4px; }
+  .star-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 24px; color: var(--border);
+    transition: color 0.15s, transform 0.1s;
+    padding: 0;
+    line-height: 1;
+  }
+  .star-btn:hover, .star-btn.selected { color: var(--orange); }
+  .star-btn:active { transform: scale(0.9); }
+
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.85rem 2rem; border-radius: 4px; font-family: var(--font-body); font-weight: 600; font-size: 0.9rem; text-decoration: none; transition: all 0.2s; cursor: pointer; border: none; }
+  .btn-primary { background: var(--orange); color: #fff; }
+  .btn-primary:hover { background: #CC5500; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .form-success {
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
+    background: rgba(255,107,0,0.08);
+    border: 1px solid rgba(255,107,0,0.3);
+    border-radius: 4px;
+    padding: 1rem 1.5rem;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    color: var(--orange);
+  }
+
+  footer { border-top: 1px solid var(--border); padding: 2rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+  .footer-logo { font-family: var(--font-display); font-size: 1.4rem; letter-spacing: 2px; color: var(--orange); }
+  .footer-links { display: flex; gap: 1.5rem; list-style: none; flex-wrap: wrap; }
+  .footer-links a { font-size: 0.8rem; color: var(--muted); text-decoration: none; transition: color 0.2s; }
+  .footer-links a:hover { color: var(--text); }
+  .footer-copy { font-size: 0.75rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-logo">BRAAPTRAX</a>
+  <ul class="nav-links">
+    <li><a href="index.html#features">Features</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+    <li><a href="feedback.html" class="active">Feedback</a></li>
+    <li><a href="contact.html">Contact</a></li>
+  </ul>
+</nav>
+
+<div class="page-header">
+  <p class="page-label">From the Community</p>
+  <h1 class="page-title">What Riders Are Saying</h1>
+  <p class="page-sub">Real feedback from beta testers and early riders. Have something to add? Drop it below.</p>
+</div>
+
+<main>
+
+  <!-- REVIEWS — you'll manually add cards here as feedback comes in, or hook up a backend later -->
+  <div id="reviewsContainer">
+
+    <!-- DEMO REVIEW — remove these and add real ones as they come in -->
+    <div class="reviews-header">
+      <h2>Beta Feedback</h2>
+      <span class="reviews-count" id="reviewCount">Showing early submissions</span>
+    </div>
+
+    <div class="reviews-grid" id="reviewsGrid">
+
+      <div class="review-card">
+        <div class="review-stars">
+          <span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span>
+        </div>
+        <div class="review-text">Finally an app that gets it. Every other tracking app is built for road cyclists or runners. BraapTrax feels like it was made by someone who actually rides.</div>
+        <div class="review-author">
+          <div class="review-avatar">JM</div>
+          <div>
+            <div class="review-name">Jake M.</div>
+            <div class="review-meta">Beta Tester · KTM 300 XCW</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="review-card">
+        <div class="review-stars">
+          <span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span>
+        </div>
+        <div class="review-text">The crew tagging feature is sick. Love being able to see who I ride with most over the season. Showing up my buddy on the leaderboard is my new mission in life.</div>
+        <div class="review-author">
+          <div class="review-avatar">SR</div>
+          <div>
+            <div class="review-name">Sara R.</div>
+            <div class="review-meta">Beta Tester · Yamaha YZ250F</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="review-card">
+        <div class="review-stars">
+          <span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star empty">★</span>
+        </div>
+        <div class="review-text">Maintenance tracking is a game changer for me. I've got three bikes and keeping up with service intervals was a mess in my notes app. This is way cleaner.</div>
+        <div class="review-author">
+          <div class="review-avatar">TC</div>
+          <div>
+            <div class="review-name">Tyler C.</div>
+            <div class="review-meta">Beta Tester · Multiple bikes</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <!-- END REVIEWS GRID — add more .review-card divs above this line -->
+
+  </div>
+
+  <!-- SUBMIT FEEDBACK -->
+  <div class="submit-section">
+    <h2>Leave Your Feedback</h2>
+    <p>Using the beta? Hype? Hate something? Want a feature? Tell us straight.</p>
+
+    <form class="feedback-form" id="feedbackForm" action="https://formspree.io/f/YOUR_FEEDBACK_FORM_ID" method="POST">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" placeholder="Your name" required>
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" name="email" placeholder="your@email.com">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Your Bike (optional)</label>
+        <input type="text" name="bike" placeholder="e.g. 2022 KTM 350 EXC-F">
+      </div>
+
+      <div class="form-group">
+        <label>Rating</label>
+        <div class="star-rating" id="starRating">
+          <button type="button" class="star-btn" data-value="1">★</button>
+          <button type="button" class="star-btn" data-value="2">★</button>
+          <button type="button" class="star-btn" data-value="3">★</button>
+          <button type="button" class="star-btn" data-value="4">★</button>
+          <button type="button" class="star-btn" data-value="5">★</button>
+        </div>
+        <input type="hidden" name="rating" id="ratingInput" value="0">
+      </div>
+
+      <div class="form-group">
+        <label>Your Feedback</label>
+        <textarea name="feedback" placeholder="What do you think? What works, what doesn't, what's missing..." required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label style="display: flex; align-items: center; gap: 0.5rem; text-transform: none; letter-spacing: 0; font-size: 0.85rem; cursor: pointer;">
+          <input type="checkbox" name="display_consent" value="yes" style="width: auto; padding: 0; border-radius: 3px;">
+          I'm okay with this feedback being shown publicly on the site
+        </label>
+      </div>
+
+      <button class="btn btn-primary" type="submit" id="feedbackSubmit">Submit Feedback</button>
+    </form>
+
+    <div class="form-success" id="feedbackSuccess" style="display: none;">
+      <span>🤙</span>
+      <span>Thanks! Your feedback means a lot. We read every single one.</span>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <div class="footer-logo">BRAAPTRAX</div>
+  <ul class="footer-links">
+    <li><a href="index.html#features">Features</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+    <li><a href="feedback.html">Feedback</a></li>
+    <li><a href="contact.html">Contact</a></li>
+  </ul>
+  <p class="footer-copy">© 2025 BraapTrax</p>
+</footer>
+
+<script>
+  // Star rating
+  const stars = document.querySelectorAll('.star-btn');
+  const ratingInput = document.getElementById('ratingInput');
+  let currentRating = 0;
+
+  stars.forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentRating = parseInt(btn.dataset.value);
+      ratingInput.value = currentRating;
+      stars.forEach((s, i) => s.classList.toggle('selected', i < currentRating));
+    });
+    btn.addEventListener('mouseenter', () => {
+      const val = parseInt(btn.dataset.value);
+      stars.forEach((s, i) => s.classList.toggle('selected', i < val));
+    });
+  });
+
+  document.getElementById('starRating').addEventListener('mouseleave', () => {
+    stars.forEach((s, i) => s.classList.toggle('selected', i < currentRating));
+  });
+
+  // Form submit
+  document.getElementById('feedbackForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const btn = document.getElementById('feedbackSubmit');
+    btn.textContent = 'Sending...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch(this.action, {
+        method: 'POST',
+        body: new FormData(this),
+        headers: { 'Accept': 'application/json' }
+      });
+      if (res.ok) {
+        this.style.display = 'none';
+        document.getElementById('feedbackSuccess').style.display = 'flex';
+      } else {
+        btn.textContent = 'Try again';
+        btn.disabled = false;
+      }
+    } catch {
+      btn.textContent = 'Try again';
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
