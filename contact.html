@@ -248,4 +248,16 @@
       });
       if (res.ok) {
         this.style.display = 'none';
-        document.getElementById('contactSuccess').sty
+        document.getElementById('contactSuccess').style.display = 'flex';
+      } else {
+        btn.textContent = 'Try again';
+        btn.disabled = false;
+      }
+    } catch {
+      btn.textContent = 'Try again';
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
