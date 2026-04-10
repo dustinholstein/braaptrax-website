@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms of Service — BraapTrax</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --orange: #FF6B00;
+    --bg: #0A0A0A;
+    --bg2: #111111;
+    --bg3: #181818;
+    --border: rgba(255,255,255,0.08);
+    --text: #F0EDE8;
+    --muted: #888;
+    --font-display: 'Bebas Neue', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+    --font-mono: 'DM Mono', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); -webkit-font-smoothing: antialiased; }
+
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 60px;
+    background: rgba(10,10,10,0.9); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo { font-family: var(--font-display); font-size: 1.8rem; letter-spacing: 2px; color: var(--orange); text-decoration: none; }
+  .nav-links { display: flex; gap: 2rem; list-style: none; }
+  .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; transition: color 0.2s; }
+  .nav-links a:hover, .nav-links a.active { color: var(--text); }
+
+  .page-header { padding: 9rem 2rem 4rem; max-width: 800px; margin: 0 auto; }
+  .page-label { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 3px; text-transform: uppercase; color: var(--orange); margin-bottom: 1rem; }
+  .page-title { font-family: var(--font-display); font-size: clamp(3rem, 8vw, 5rem); letter-spacing: 2px; line-height: 1; margin-bottom: 1rem; }
+  .page-sub { color: var(--muted); font-weight: 300; }
+
+  main { max-width: 800px; margin: 0 auto; padding: 0 2rem 6rem; }
+
+  .policy-updated {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin-bottom: 3rem;
+  }
+
+  .policy-section { margin-bottom: 3rem; }
+
+  .policy-section h2 {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    letter-spacing: 2px;
+    color: var(--orange);
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .policy-section p, .policy-section li {
+    color: var(--muted);
+    font-weight: 300;
+    line-height: 1.8;
+    font-size: 0.95rem;
+  }
+
+  .policy-section p { margin-bottom: 1rem; }
+  .policy-section p:last-child { margin-bottom: 0; }
+
+  .policy-section ul {
+    list-style: none;
+    margin-bottom: 1rem;
+  }
+
+  .policy-section ul li {
+    padding: 0.4rem 0;
+    padding-left: 1.25rem;
+    position: relative;
+  }
+
+  .policy-section ul li::before {
+    content: '—';
+    position: absolute;
+    left: 0;
+    color: var(--orange);
+  }
+
+  .policy-section a {
+    color: var(--orange);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+
+  .policy-section a:hover { color: var(--text); }
+
+  @media (max-width: 640px) { .nav-links { display: none; } }
+
+  footer { border-top: 1px solid var(--border); padding: 2rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+  .footer-logo { font-family: var(--font-display); font-size: 1.4rem; letter-spacing: 2px; color: var(--orange); }
+  .footer-links { display: flex; gap: 1.5rem; list-style: none; flex-wrap: wrap; }
+  .footer-links a { font-size: 0.8rem; color: var(--muted); text-decoration: none; transition: color 0.2s; }
+  .footer-links a:hover { color: var(--text); }
+  .footer-copy { font-size: 0.75rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-logo">BRAAPTRAX</a>
+  <ul class="nav-links">
+    <li><a href="index.html#features">Features</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+    <li><a href="feedback.html">Feedback</a></li>
+    <li><a href="contact.html">Contact</a></li>
+  </ul>
+</nav>
+
+<div class="page-header">
+  <p class="page-label">Legal</p>
+  <h1 class="page-title">Terms of Service</h1>
+  <p class="page-sub">The rules and agreement that apply when you use BraapTrax.</p>
+</div>
+
+<main>
+
+  <p class="policy-updated">Last updated: April 10, 2026</p>
+
+  <div class="policy-section">
+    <h2>Agreement</h2>
+    <p>These Terms of Service ("Terms") form a legal agreement between you and Dustin Holstein, a sole proprietor doing business as BraapTrax ("BraapTrax," "we," "our," or "us"), governing your use of the BraapTrax mobile application for iPhone and any related services (collectively, the "App"). By downloading, installing, creating an account, or using BraapTrax, you agree to these Terms. If you do not agree, do not use the App.</p>
+    <p>BraapTrax is a GPS ride tracking app built for dirt bikers. It records rides, tracks bikes and maintenance, and offers social features such as crews, activity feeds, and leaderboards.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Eligibility and Accounts</h2>
+    <p>You must be at least 13 years old to create a BraapTrax account. By creating an account you represent that the information you provide is accurate and that you will keep it up to date. You are responsible for maintaining the confidentiality of your account credentials and for all activity that occurs under your account.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Subscriptions</h2>
+    <p>BraapTrax offers optional auto-renewing subscriptions that unlock premium features. Subscriptions are sold through the Apple App Store and are billed to your Apple ID.</p>
+    <p>The current subscription products are:</p>
+    <ul>
+      <li><strong>BraapTrax Pro Monthly</strong> — $4.99 USD per month, auto-renewing monthly</li>
+      <li><strong>BraapTrax Pro Annual</strong> — $39.99 USD per year, auto-renewing annually</li>
+    </ul>
+    <p>Prices are shown in U.S. dollars. Prices in other currencies and regions may vary and will be disclosed in the App Store at the time of purchase.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Free Trial</h2>
+    <p>BraapTrax offers a 30-day free trial tied to account creation. The free trial begins when you create your BraapTrax account and gives you access to premium features at no charge for the trial period. You are not required to start a paid subscription to use the free trial.</p>
+    <p>If you choose to purchase a subscription before your free trial ends, any unused portion of the free trial is forfeited at the time of purchase, as required by Apple.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Auto-Renewal, Billing, and Cancellation</h2>
+    <p>By purchasing an auto-renewing subscription, you acknowledge and agree to the following:</p>
+    <ul>
+      <li>Payment will be charged to your Apple ID account at confirmation of purchase.</li>
+      <li>Your subscription automatically renews unless auto-renew is turned off at least 24 hours before the end of the current period.</li>
+      <li>Your account will be charged for renewal within 24 hours prior to the end of the current period at the same price as the current subscription, unless the price has been changed and you were notified in advance.</li>
+      <li>You can manage your subscriptions and turn off auto-renewal at any time by going to your Apple ID Account Settings on your device after purchase.</li>
+      <li>Any unused portion of a free trial period, if offered, will be forfeited when you purchase a subscription, where applicable.</li>
+    </ul>
+    <p>Except where required by law, subscription payments are non-refundable. Refund requests are handled by Apple pursuant to Apple's refund policies; please contact Apple Support to request a refund.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>License to Use the App</h2>
+    <p>Subject to your compliance with these Terms, BraapTrax grants you a limited, personal, non-exclusive, non-transferable, non-sublicensable, revocable license to download and use the App on any Apple-branded device that you own or control, solely for your personal, non-commercial use. This license is consistent with, and additionally subject to, the Apple Media Services Terms and Conditions and Apple's Licensed Application End User License Agreement (the "Standard EULA," Schedule 2 of the Apple Developer Program License Agreement).</p>
+    <p>You may review the Apple Standard EULA at <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/" target="_blank" rel="noopener">https://www.apple.com/legal/internet-services/itunes/dev/stdeula/</a>. By subscribing to or using BraapTrax, you agree that the Apple Standard EULA also applies to your use of the App, and in the event of any conflict between these Terms and the Apple Standard EULA with respect to your use of the App on Apple devices, the Apple Standard EULA will govern solely to the extent of the conflict.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Acceptable Use</h2>
+    <p>You agree not to use BraapTrax to do any of the following, and you will not encourage or enable anyone else to do so:</p>
+    <ul>
+      <li>Violate any applicable law, regulation, or third-party right</li>
+      <li>Copy, modify, decompile, reverse engineer, disassemble, or attempt to derive the source code of the App, except to the extent permitted by applicable law</li>
+      <li>Scrape, crawl, harvest, or otherwise extract data from the App or its back-end services using automated means</li>
+      <li>Post, upload, or share content that is abusive, harassing, threatening, hateful, sexually explicit, violent, defamatory, or otherwise objectionable within crews, feeds, leaderboards, or any other social feature</li>
+      <li>Impersonate any person or entity or misrepresent your affiliation with a person or entity</li>
+      <li>Upload content that infringes anyone's intellectual property, privacy, or other rights, or that is unlawful</li>
+      <li>Interfere with, disrupt, or attempt to gain unauthorized access to any part of the App, its servers, or its networks</li>
+      <li>Use the App in a way that could damage, disable, overburden, or impair the service</li>
+    </ul>
+    <p>Riding is inherently risky. You are solely responsible for riding safely, obeying all laws, staying on legal trails and property, and making your own judgment about conditions. BraapTrax is a tracking tool, not a safety device.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Your Content</h2>
+    <p>BraapTrax's social features let you upload and share content such as rides, routes, photos, bike details, maintenance logs, comments, and profile information ("Your Content"). You retain ownership of Your Content.</p>
+    <p>By uploading Your Content to BraapTrax, you grant BraapTrax a worldwide, non-exclusive, royalty-free, sublicensable, and transferable license to host, store, reproduce, display, distribute, and otherwise use Your Content as reasonably necessary to operate, provide, and improve the App and its social, feed, crew, and leaderboard features, including displaying Your Content to the people you share it with. This license ends when you delete Your Content or your account, except that (a) backup copies may persist for a reasonable period, and (b) content you have shared with others may remain visible to them.</p>
+    <p>You represent that you own or have the necessary rights to Your Content and that Your Content does not violate these Terms or any third-party rights.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Account Suspension and Termination</h2>
+    <p>We may suspend or terminate your account, or restrict your access to the App, at any time if we reasonably believe you have violated these Terms, created risk or legal exposure for BraapTrax or other users, or if your account has been inactive for an extended period. Where reasonable, we will give you notice.</p>
+    <p>You may stop using BraapTrax at any time. You may delete your account and all associated data at any time from within the App's account settings, or by contacting us at <a href="contact.html">braaptrax.com/contact</a>. Deleting your account does not cancel an active Apple subscription — you must cancel auto-renewal through your Apple ID Account Settings.</p>
+    <p>Provisions of these Terms that by their nature should survive termination (including ownership, disclaimers, limitations of liability, and governing law) will survive.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Intellectual Property</h2>
+    <p>The App, including its software, design, text, graphics, logos, and trademarks (other than Your Content), is owned by BraapTrax or its licensors and is protected by intellectual property laws. Except for the license expressly granted above, no rights are granted to you.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Third-Party Services</h2>
+    <p>BraapTrax relies on third-party services, including the Apple App Store and Firebase (provided by Google) for authentication and storage. Your use of those services is subject to their own terms. BraapTrax is not responsible for third-party services.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Disclaimer of Warranties</h2>
+    <p>THE APP IS PROVIDED "AS IS" AND "AS AVAILABLE," WITH ALL FAULTS AND WITHOUT WARRANTY OF ANY KIND. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, BRAAPTRAX DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, QUIET ENJOYMENT, ACCURACY, AND NON-INFRINGEMENT. BRAAPTRAX DOES NOT WARRANT THAT THE APP WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR THAT GPS, ROUTE, ELEVATION, SPEED, OR DISTANCE DATA WILL BE ACCURATE OR COMPLETE.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Limitation of Liability</h2>
+    <p>TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT WILL BRAAPTRAX OR ITS OWNER BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, REVENUE, DATA, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATED TO YOUR USE OF THE APP, EVEN IF BRAAPTRAX HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. BRAAPTRAX'S TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS RELATING TO THE APP WILL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID TO BRAAPTRAX FOR THE APP IN THE TWELVE (12) MONTHS IMMEDIATELY PRECEDING THE EVENT GIVING RISE TO THE CLAIM, OR (B) FIFTY U.S. DOLLARS ($50.00).</p>
+    <p>Some jurisdictions do not allow the exclusion or limitation of certain warranties or liabilities, so some of the above may not apply to you.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Indemnification</h2>
+    <p>You agree to defend, indemnify, and hold harmless BraapTrax and its owner from and against any claims, liabilities, damages, losses, and expenses (including reasonable attorneys' fees) arising out of or related to your use of the App, Your Content, or your violation of these Terms or applicable law.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Governing Law</h2>
+    <p>These Terms are governed by and construed in accordance with the laws of the State of Utah, without regard to its conflict of laws principles. You agree that any dispute arising out of or relating to these Terms or the App that is not subject to arbitration or required to be handled by Apple will be brought exclusively in the state or federal courts located in the State of Utah, and you consent to the personal jurisdiction and venue of those courts.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Changes to These Terms</h2>
+    <p>We may update these Terms from time to time. If we make material changes, we will notify you through the App or by other reasonable means and update the "Last updated" date above. Your continued use of BraapTrax after changes take effect constitutes your acceptance of the updated Terms. If you do not agree to the updated Terms, you must stop using the App.</p>
+  </div>
+
+  <div class="policy-section">
+    <h2>Contact</h2>
+    <p>Questions about these Terms or about BraapTrax can be sent through <a href="contact.html">braaptrax.com/contact</a>. BraapTrax is operated by Dustin Holstein, sole proprietor doing business as BraapTrax.</p>
+  </div>
+
+</main>
+
+<footer>
+  <div class="footer-logo">BRAAPTRAX</div>
+  <ul class="footer-links">
+    <li><a href="index.html#features">Features</a></li>
+    <li><a href="faq.html">FAQ</a></li>
+    <li><a href="feedback.html">Feedback</a></li>
+    <li><a href="contact.html">Contact</a></li>
+    <li><a href="privacy.html">Privacy</a></li>
+    <li><a href="terms.html">Terms</a></li>
+  </ul>
+  <p class="footer-copy">&copy; 2025 BraapTrax</p>
+</footer>
+
+</body>
+</html>
