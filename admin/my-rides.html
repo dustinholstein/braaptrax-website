@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>My Rides — BraapTrax Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div class="bt-wrap" id="content" hidden>
+  <div class="bt-header">
+    <div class="bt-eyebrow">Admin</div>
+    <h1 class="bt-title">My Rides</h1>
+    <p class="bt-sub">Pick one of your recorded rides to publish as a verified trail.</p>
+  </div>
+  <div id="rides"></div>
+  <div class="bt-center" id="more-wrap" hidden>
+    <button class="bt-btn bt-btn-ghost" id="more-btn">Load more</button>
+  </div>
+</div>
+
+<div class="bt-wrap" id="boot">
+  <div class="bt-loading"><span class="bt-spinner"></span></div>
+</div>
+
+<script type="module">
+  import {
+    guardPage,
+    db,
+    collection, query, where, orderBy, limit, startAfter, getDocs,
+    formatDate, metersToMiles, metersToFeet, rideTypeIcon, escapeHtml, toMillis,
+  } from "/admin/admin.js";
+
+  const PAGE_SIZE = 50;
+  const { user } = await guardPage("my-rides");
+
+  document.getElementById("boot").remove();
+  const content = document.getElementById("content");
+  content.hidden = false;
+
+  const ridesEl = document.getElementById("rides");
+  const moreWrap = document.getElementById("more-wrap");
+  const moreBtn = document.getElementById("more-btn");
+
+  let lastDoc = null;
+  let loadedAny = false;
+  // True when we had to fall back to an unordered query (missing composite
+  // index) and therefore sort/page on the client.
+  let clientSort = false;
+  let allDocs = [];
+
+  function rideRow(id, r) {
+    const miles = metersToMiles(r.distanceMeters).toFixed(1);
+    const feet = Math.round(metersToFeet(r.elevationGainMeters));
+    const place = r.city || r.region || r.locationName || "";
+    return `
+      <div class="bt-row">
+        <div class="bt-row-icon">${rideTypeIcon(r.rideType)}</div>
+        <div class="bt-row-main">
+          <div class="bt-row-title">${formatDate(r.createdAt || r.startedAt || r.date)}</div>
+          <div class="bt-row-meta">
+            <span>${escapeHtml(r.rideType || "ride")}</span>
+            <span>${miles} mi</span>
+            <span>${feet.toLocaleString()} ft gain</span>
+            ${place ? `<span>${escapeHtml(place)}</span>` : ""}
+          </div>
+        </div>
+        <div class="bt-row-actions">
+          <a class="bt-btn bt-btn-primary bt-btn-sm" href="/admin/publish.html?rideId=${encodeURIComponent(id)}">Publish as Verified Trail</a>
+        </div>
+      </div>`;
+  }
+
+  function renderRows(docs) {
+    if (!loadedAny && docs.length === 0) {
+      ridesEl.innerHTML = `<div class="bt-empty">No rides found on this account yet.</div>`;
+      return;
+    }
+    loadedAny = true;
+    if (!ridesEl.querySelector(".bt-list")) {
+      ridesEl.innerHTML = `<div class="bt-list"></div>`;
+    }
+    const list = ridesEl.querySelector(".bt-list");
+    list.insertAdjacentHTML(
+      "beforeend",
+      docs.map((d) => rideRow(d.id, d.data())).join("")
+    );
+  }
+
+  async function loadOrdered() {
+    let q = query(
+      collection(db, "rides"),
+      where("userId", "==", user.uid),
+      orderBy("createdAt", "desc"),
+      limit(PAGE_SIZE)
+    );
+    if (lastDoc) q = query(q, startAfter(lastDoc));
+    const snap = await getDocs(q);
+    lastDoc = snap.docs[snap.docs.length - 1] || lastDoc;
+    renderRows(snap.docs);
+    moreWrap.hidden = snap.size < PAGE_SIZE;
+  }
+
+  // Fallback: no composite (userId ==, createdAt desc) index. Pull the
+  // user's rides once, sort newest-first on the client, page through locally.
+  async function loadAllClientSorted() {
+    const snap = await getDocs(
+      query(collection(db, "rides"), where("userId", "==", user.uid))
+    );
+    allDocs = snap.docs.slice().sort(
+      (a, b) =>
+        toMillis(b.data().createdAt || b.data().startedAt) -
+        toMillis(a.data().createdAt || a.data().startedAt)
+    );
+    renderClientPage();
+  }
+
+  let clientOffset = 0;
+  function renderClientPage() {
+    const page = allDocs.slice(clientOffset, clientOffset + PAGE_SIZE);
+    clientOffset += page.length;
+    renderRows(page);
+    moreWrap.hidden = clientOffset >= allDocs.length;
+  }
+
+  async function load() {
+    try {
+      if (clientSort) {
+        renderClientPage();
+      } else {
+        await loadOrdered();
+      }
+    } catch (e) {
+      // Missing index -> fall back to client sorting, once.
+      if (!clientSort && (e.code === "failed-precondition" || /index/i.test(e.message || ""))) {
+        console.warn("[my-rides] falling back to client-side sort:", e.message);
+        clientSort = true;
+        await loadAllClientSorted();
+        return;
+      }
+      console.error(e);
+      ridesEl.innerHTML = `<div class="bt-empty">Couldn't load rides. ${escapeHtml(e.message || e)}</div>`;
+    }
+  }
+
+  moreBtn.addEventListener("click", async () => {
+    moreBtn.disabled = true;
+    moreBtn.textContent = "Loading…";
+    await load();
+    moreBtn.disabled = false;
+    moreBtn.textContent = "Load more";
+  });
+
+  await load();
+</script>
+
+</body>
+</html>

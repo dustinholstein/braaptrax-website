@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Publish Trail — BraapTrax Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div class="bt-wrap" id="content" hidden>
+  <div class="bt-header">
+    <div class="bt-eyebrow">Admin</div>
+    <h1 class="bt-title" id="page-title">Publish Verified Trail</h1>
+    <p class="bt-sub" id="page-sub">Review the ride data, fill in the trail details, and publish.</p>
+  </div>
+
+  <form class="bt-form" id="trail-form" novalidate>
+    <div class="bt-field">
+      <span class="bt-label">Route Preview</span>
+      <div class="bt-map" id="map"></div>
+      <span class="bt-hint" id="map-hint"></span>
+    </div>
+
+    <div class="bt-grid-2">
+      <div class="bt-field">
+        <label class="bt-label" for="name">Name <span class="req">*</span></label>
+        <input class="bt-input" type="text" id="name" maxlength="120" required>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="region">Region <span class="req">*</span></label>
+        <input class="bt-input" type="text" id="region" placeholder="Moab, UT" maxlength="120" required>
+      </div>
+    </div>
+
+    <div class="bt-field">
+      <label class="bt-label" for="description">Description</label>
+      <textarea class="bt-textarea" id="description" maxlength="2000"></textarea>
+    </div>
+
+    <div class="bt-grid-2">
+      <div class="bt-field">
+        <label class="bt-label" for="difficulty">Difficulty</label>
+        <select class="bt-select" id="difficulty">
+          <option value="beginner">Beginner</option>
+          <option value="intermediate">Intermediate</option>
+          <option value="advanced">Advanced</option>
+          <option value="expert">Expert</option>
+        </select>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="rideType">Ride Type</label>
+        <select class="bt-select" id="rideType"></select>
+      </div>
+    </div>
+
+    <div class="bt-grid-2">
+      <div class="bt-field">
+        <label class="bt-label" for="distance">Distance (miles)</label>
+        <input class="bt-input" type="text" id="distance" readonly>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="elevation">Elevation Gain (feet)</label>
+        <input class="bt-input" type="text" id="elevation" readonly>
+      </div>
+    </div>
+
+    <div class="bt-grid-2">
+      <div class="bt-field">
+        <label class="bt-label" for="startLat">Start Latitude</label>
+        <input class="bt-input" type="text" id="startLat" readonly>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="startLng">Start Longitude</label>
+        <input class="bt-input" type="text" id="startLng" readonly>
+      </div>
+    </div>
+
+    <div class="bt-field">
+      <label class="bt-label" for="photos">Photos <span class="bt-hint">(max 10 · resized to 1920px · JPEG)</span></label>
+      <input type="file" id="photos" accept="image/*" multiple>
+      <div class="bt-photos" id="photo-grid"></div>
+    </div>
+
+    <div class="bt-error" id="form-error"></div>
+    <div class="bt-form-actions">
+      <button class="bt-btn bt-btn-primary" type="submit" id="submit-btn">Publish Trail</button>
+      <a class="bt-btn bt-btn-ghost" href="/admin/my-rides.html">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<div class="bt-wrap" id="boot">
+  <div class="bt-loading"><span class="bt-spinner"></span></div>
+</div>
+
+<script type="module">
+  import {
+    guardPage,
+    db, storage,
+    doc, collection, getDoc, setDoc, updateDoc, serverTimestamp,
+    storageRef, uploadBytes, getDownloadURL,
+    decodePolyline, metersToMiles, metersToFeet,
+    compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
+    RIDE_TYPES, queueToast, showToast, escapeHtml,
+  } from "/admin/admin.js";
+
+  const { user } = await guardPage("publish");
+
+  const params = new URLSearchParams(location.search);
+  const rideId = params.get("rideId");
+  const trailId = params.get("trailId");
+  const isEdit = !!trailId;
+
+  // Populate the ride-type dropdown.
+  const rideTypeSel = document.getElementById("rideType");
+  rideTypeSel.innerHTML = RIDE_TYPES.map(
+    (t) => `<option value="${t}">${t}</option>`
+  ).join("");
+
+  function ensureRideTypeOption(val) {
+    if (!val) return;
+    if (![...rideTypeSel.options].some((o) => o.value === val)) {
+      rideTypeSel.insertAdjacentHTML(
+        "afterbegin",
+        `<option value="${escapeHtml(val)}">${escapeHtml(val)}</option>`
+      );
+    }
+    rideTypeSel.value = val;
+  }
+
+  // Source data carried through from the ride / existing trail.
+  const src = {
+    distanceMeters: 0,
+    elevationGainMeters: 0,
+    polyline: "",
+    startLatitude: null,
+    startLongitude: null,
+  };
+
+  const boot = document.getElementById("boot");
+  const content = document.getElementById("content");
+  const errEl = document.getElementById("form-error");
+
+  function fail(msg) {
+    boot.innerHTML = `<div class="bt-empty">${escapeHtml(msg)} <br><br><a class="bt-btn bt-btn-ghost" href="/admin/my-rides.html">Back to My Rides</a></div>`;
+  }
+
+  if (!rideId && !trailId) {
+    fail("No ride or trail selected. Open this page from My Rides or Trails.");
+    throw new Error("missing id");
+  }
+
+  let snap;
+  try {
+    snap = await getDoc(
+      isEdit ? doc(db, "verifiedTrails", trailId) : doc(db, "rides", rideId)
+    );
+  } catch (e) {
+    fail("Failed to load: " + (e.message || e));
+    throw e;
+  }
+  if (!snap.exists()) {
+    fail(isEdit ? "Trail not found." : "Ride not found.");
+    throw new Error("not found");
+  }
+  const data = snap.data();
+
+  // ---- Prefill ----
+  src.distanceMeters = Number(data.distanceMeters) || 0;
+  src.elevationGainMeters = Number(data.elevationGainMeters) || 0;
+  src.polyline = data.polyline || data.encodedPolyline || "";
+
+  const coords = decodePolyline(src.polyline);
+  if (coords.length) {
+    src.startLatitude = coords[0][0];
+    src.startLongitude = coords[0][1];
+  } else {
+    src.startLatitude =
+      data.startLatitude != null ? Number(data.startLatitude) : null;
+    src.startLongitude =
+      data.startLongitude != null ? Number(data.startLongitude) : null;
+  }
+
+  document.getElementById("distance").value =
+    metersToMiles(src.distanceMeters).toFixed(2);
+  document.getElementById("elevation").value = String(
+    Math.round(metersToFeet(src.elevationGainMeters))
+  );
+  document.getElementById("startLat").value =
+    src.startLatitude != null ? src.startLatitude.toFixed(6) : "—";
+  document.getElementById("startLng").value =
+    src.startLongitude != null ? src.startLongitude.toFixed(6) : "—";
+  ensureRideTypeOption(data.rideType || "trail");
+
+  // Existing photos kept across an edit (removable). New uploads are staged
+  // separately and compressed on selection.
+  const existingPhotos = []; // { url }
+  const newPhotos = []; // { blob, objectURL, name }
+
+  if (isEdit) {
+    document.getElementById("page-title").textContent = "Edit Verified Trail";
+    document.getElementById("page-sub").textContent =
+      "Update this verified trail's details.";
+    document.getElementById("submit-btn").textContent = "Save Changes";
+    document.getElementById("name").value = data.name || "";
+    document.getElementById("region").value = data.region || "";
+    document.getElementById("description").value = data.description || "";
+    if (data.difficulty) document.getElementById("difficulty").value = data.difficulty;
+    (data.photoURLs || data.photos || []).forEach((url) =>
+      existingPhotos.push({ url })
+    );
+  }
+
+  boot.remove();
+  content.hidden = false;
+
+  // ---- Leaflet preview ----
+  const mapHint = document.getElementById("map-hint");
+  if (coords.length && window.L) {
+    const map = L.map("map", { attributionControl: true });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+    const line = L.polyline(coords, { color: "#FF6B00", weight: 4 }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [20, 20] });
+  } else {
+    document.getElementById("map").style.display = "none";
+    mapHint.textContent = coords.length
+      ? "Map library failed to load."
+      : "No route data available for this ride.";
+  }
+
+  // ---- Photo grid ----
+  const grid = document.getElementById("photo-grid");
+  const fileInput = document.getElementById("photos");
+
+  function renderPhotos() {
+    const items = [
+      ...existingPhotos.map((p, i) => ({ src: p.url, kind: "existing", i })),
+      ...newPhotos.map((p, i) => ({ src: p.objectURL, kind: "new", i })),
+    ];
+    grid.innerHTML = items
+      .map(
+        (it) => `
+        <div class="bt-photo">
+          <img src="${escapeHtml(it.src)}" alt="">
+          <button type="button" class="bt-photo-remove" data-kind="${it.kind}" data-i="${it.i}" aria-label="Remove photo">&times;</button>
+        </div>`
+      )
+      .join("");
+  }
+
+  grid.addEventListener("click", (e) => {
+    const btn = e.target.closest(".bt-photo-remove");
+    if (!btn) return;
+    const i = Number(btn.dataset.i);
+    if (btn.dataset.kind === "existing") existingPhotos.splice(i, 1);
+    else {
+      URL.revokeObjectURL(newPhotos[i].objectURL);
+      newPhotos.splice(i, 1);
+    }
+    renderPhotos();
+  });
+
+  fileInput.addEventListener("change", async () => {
+    errEl.textContent = "";
+    const files = [...fileInput.files];
+    fileInput.value = "";
+    for (const file of files) {
+      if (existingPhotos.length + newPhotos.length >= MAX_PHOTOS) {
+        errEl.textContent = `Maximum ${MAX_PHOTOS} photos.`;
+        break;
+      }
+      try {
+        const blob = await compressImage(file);
+        if (blob.size > MAX_PHOTO_BYTES) {
+          errEl.textContent = `"${file.name}" is still over 5MB after compression and was skipped.`;
+          continue;
+        }
+        newPhotos.push({
+          blob,
+          objectURL: URL.createObjectURL(blob),
+          name: file.name,
+        });
+        renderPhotos();
+      } catch (err) {
+        console.error(err);
+        errEl.textContent = `Couldn't process "${file.name}".`;
+      }
+    }
+  });
+
+  if (isEdit) renderPhotos();
+
+  // ---- Submit ----
+  const form = document.getElementById("trail-form");
+  const submitBtn = document.getElementById("submit-btn");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errEl.textContent = "";
+
+    const name = document.getElementById("name").value.trim();
+    const region = document.getElementById("region").value.trim();
+    if (!name || !region) {
+      errEl.textContent = "Name and Region are required.";
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = isEdit ? "Saving…" : "Publishing…";
+
+    try {
+      // Resolve the target doc + id.
+      let trailRef;
+      let targetId;
+      if (isEdit) {
+        trailRef = doc(db, "verifiedTrails", trailId);
+        targetId = trailId;
+      } else {
+        trailRef = doc(collection(db, "verifiedTrails"));
+        targetId = trailRef.id;
+      }
+
+      // Upload new photos; final list = kept existing + freshly uploaded.
+      const photoURLs = existingPhotos.map((p) => p.url);
+      for (let i = 0; i < newPhotos.length; i++) {
+        const index = photoURLs.length + i;
+        // Per spec: verified_trails/{trailId}/{index}.jpg
+        const r = storageRef(
+          storage,
+          `verified_trails/${targetId}/${index}.jpg`
+        );
+        await uploadBytes(r, newPhotos[i].blob, { contentType: "image/jpeg" });
+        photoURLs.push(await getDownloadURL(r));
+      }
+
+      const editable = {
+        name,
+        region,
+        description: document.getElementById("description").value.trim(),
+        difficulty: document.getElementById("difficulty").value,
+        rideType: rideTypeSel.value,
+        distanceMeters: src.distanceMeters,
+        elevationGainMeters: src.elevationGainMeters,
+        polyline: src.polyline,
+        startLatitude: src.startLatitude,
+        startLongitude: src.startLongitude,
+        photoURLs,
+      };
+
+      if (isEdit) {
+        await updateDoc(trailRef, {
+          ...editable,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(trailRef, {
+          ...editable,
+          source: "user_ride",
+          sourceRideId: rideId,
+          sourceUserId: user.uid,
+          verifiedBy: user.uid,
+          verifiedAt: serverTimestamp(),
+          addedAt: serverTimestamp(),
+          isActive: true,
+        });
+      }
+
+      queueToast(
+        isEdit ? "Trail updated." : "Trail published.",
+        "success"
+      );
+      location.assign("/admin/trails.html");
+    } catch (err) {
+      console.error(err);
+      errEl.textContent =
+        "Save failed: " + (err && err.message ? err.message : err);
+      submitBtn.disabled = false;
+      submitBtn.textContent = isEdit ? "Save Changes" : "Publish Trail";
+    }
+  });
+</script>
+
+</body>
+</html>
