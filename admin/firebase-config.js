@@ -6,20 +6,15 @@
 // deployed from the iOS app repo. Shipping these in a public static file
 // is the standard, supported Firebase web pattern.
 //
-// Use the *Web* app's apiKey/appId from Firebase Console → Project settings
-// → Your apps → Web app. Do NOT reuse the iOS app's API key: it may be
-// bundle-id-restricted and would be rejected from a browser origin.
-//
-// TODO(dustin): paste the Web app's real apiKey and appId below (the only
-// two values that can't be derived). authDomain / projectId /
-// storageBucket / messagingSenderId are final and correct as-is — in
-// particular storageBucket uses the new ".firebasestorage.app" domain
-// verbatim; do NOT rewrite it to ".appspot.com".
+// Sourced from the Firebase Console *Web* app "BraapTrax Admin"
+// (NOT the iOS app — its API key is bundle-restricted in browsers).
+// measurementId is intentionally omitted: the panel does not use
+// Analytics, and it isn't required by the SDKs we load.
 export const firebaseConfig = {
-  apiKey: "PASTE_WEB_APP_API_KEY_HERE",
+  apiKey: "AIzaSyDRRF610MkOkWs04YWQmEqTt0Kje4XLlg8",
   authDomain: "braaptrax-41ada.firebaseapp.com",
   projectId: "braaptrax-41ada",
   storageBucket: "braaptrax-41ada.firebasestorage.app",
   messagingSenderId: "670354051007",
-  appId: "PASTE_WEB_APP_APP_ID_HERE",
+  appId: "1:670354051007:web:54e86d58ffc2b9095b9b0a",
 };
