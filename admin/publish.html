@@ -25,9 +25,20 @@
 
   <form class="bt-form" id="trail-form" novalidate>
     <div class="bt-field">
-      <span class="bt-label">Route Preview</span>
+      <span class="bt-label">Route<span id="route-req" hidden> <span class="req">*</span></span></span>
       <div class="bt-map" id="map"></div>
       <span class="bt-hint" id="map-hint"></span>
+      <div id="route-tools" hidden>
+        <div class="bt-row-actions" style="margin-top:.6rem">
+          <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-undo">Undo point</button>
+          <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-clear">Clear route</button>
+        </div>
+        <details style="margin-top:.75rem">
+          <summary class="bt-hint" style="cursor:pointer">…or paste an encoded polyline (standard, precision&nbsp;5)</summary>
+          <textarea class="bt-textarea" id="route-paste" style="min-height:64px;margin-top:.5rem"></textarea>
+          <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-load" style="margin-top:.5rem">Load polyline</button>
+        </details>
+      </div>
     </div>
 
     <div class="bt-grid-2">
@@ -90,6 +101,14 @@
       <div class="bt-photos" id="photo-grid"></div>
     </div>
 
+    <div class="bt-field">
+      <label class="bt-label" for="isActive" style="display:flex;align-items:center;gap:0.6rem;cursor:pointer;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="isActive" checked style="width:auto;accent-color:var(--orange);">
+        <span>Active &mdash; visible in the BraapTrax app</span>
+      </label>
+      <span class="bt-hint">The app only shows trails where this is on. New trails default to active.</span>
+    </div>
+
     <div class="bt-error" id="form-error"></div>
     <div class="bt-form-actions">
       <button class="bt-btn bt-btn-primary" type="submit" id="submit-btn">Publish Trail</button>
@@ -105,12 +124,13 @@
 <script type="module">
   import {
     guardPage,
-    db, storage,
+    db,
     doc, collection, getDoc, setDoc, updateDoc, serverTimestamp,
-    storageRef, uploadBytes, getDownloadURL,
-    decodePolyline, metersToMiles, metersToFeet,
+    uploadTrailPhoto, resolvePhotoDisplayURL,
+    decodePolyline, encodePolyline, routeDistanceMeters,
+    metersToMiles, metersToFeet, feetToMeters,
     compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
-    RIDE_TYPES, queueToast, showToast, escapeHtml,
+    RIDE_TYPES, queueToast, escapeHtml,
   } from "/admin/admin.js";
 
   const { user } = await guardPage("publish");
@@ -119,6 +139,9 @@
   const rideId = params.get("rideId");
   const trailId = params.get("trailId");
   const isEdit = !!trailId;
+  const isRide = !isEdit && !!rideId;
+  // No ride and no trail -> manual (no-ride) entry: admin draws the route.
+  const isManual = !isEdit && !isRide;
 
   // Populate the ride-type dropdown.
   const rideTypeSel = document.getElementById("rideType");
@@ -154,56 +177,72 @@
     boot.innerHTML = `<div class="bt-empty">${escapeHtml(msg)} <br><br><a class="bt-btn bt-btn-ghost" href="/admin/my-rides.html">Back to My Rides</a></div>`;
   }
 
-  if (!rideId && !trailId) {
-    fail("No ride or trail selected. Open this page from My Rides or Trails.");
-    throw new Error("missing id");
+  // Manual entry has no source doc; ride/edit fetch theirs.
+  let data = {};
+  let coords = [];
+  if (!isManual) {
+    let snap;
+    try {
+      snap = await getDoc(
+        isEdit ? doc(db, "verifiedTrails", trailId) : doc(db, "rides", rideId)
+      );
+    } catch (e) {
+      fail("Failed to load: " + (e.message || e));
+      throw e;
+    }
+    if (!snap.exists()) {
+      fail(isEdit ? "Trail not found." : "Ride not found.");
+      throw new Error("not found");
+    }
+    data = snap.data();
+
+    // ---- Prefill from ride / existing trail ----
+    src.distanceMeters = Number(data.distanceMeters) || 0;
+    src.elevationGainMeters = Number(data.elevationGainMeters) || 0;
+    src.polyline = data.polyline || data.encodedPolyline || "";
+    coords = decodePolyline(src.polyline);
+    if (coords.length) {
+      src.startLatitude = coords[0][0];
+      src.startLongitude = coords[0][1];
+    } else {
+      src.startLatitude =
+        data.startLatitude != null ? Number(data.startLatitude) : null;
+      src.startLongitude =
+        data.startLongitude != null ? Number(data.startLongitude) : null;
+    }
   }
 
-  let snap;
-  try {
-    snap = await getDoc(
-      isEdit ? doc(db, "verifiedTrails", trailId) : doc(db, "rides", rideId)
-    );
-  } catch (e) {
-    fail("Failed to load: " + (e.message || e));
-    throw e;
+  // Distance + start coords are always derived (from the ride, the existing
+  // trail, or the manually drawn route) and shown read-only. Elevation is
+  // derived for ride/edit but admin-entered for manual.
+  function syncDerivedFields() {
+    document.getElementById("distance").value = metersToMiles(
+      src.distanceMeters
+    ).toFixed(2);
+    if (!isManual) {
+      document.getElementById("elevation").value = String(
+        Math.round(metersToFeet(src.elevationGainMeters))
+      );
+    }
+    document.getElementById("startLat").value = Number.isFinite(
+      src.startLatitude
+    )
+      ? src.startLatitude.toFixed(6)
+      : "—";
+    document.getElementById("startLng").value = Number.isFinite(
+      src.startLongitude
+    )
+      ? src.startLongitude.toFixed(6)
+      : "—";
   }
-  if (!snap.exists()) {
-    fail(isEdit ? "Trail not found." : "Ride not found.");
-    throw new Error("not found");
-  }
-  const data = snap.data();
-
-  // ---- Prefill ----
-  src.distanceMeters = Number(data.distanceMeters) || 0;
-  src.elevationGainMeters = Number(data.elevationGainMeters) || 0;
-  src.polyline = data.polyline || data.encodedPolyline || "";
-
-  const coords = decodePolyline(src.polyline);
-  if (coords.length) {
-    src.startLatitude = coords[0][0];
-    src.startLongitude = coords[0][1];
-  } else {
-    src.startLatitude =
-      data.startLatitude != null ? Number(data.startLatitude) : null;
-    src.startLongitude =
-      data.startLongitude != null ? Number(data.startLongitude) : null;
-  }
-
-  document.getElementById("distance").value =
-    metersToMiles(src.distanceMeters).toFixed(2);
-  document.getElementById("elevation").value = String(
-    Math.round(metersToFeet(src.elevationGainMeters))
-  );
-  document.getElementById("startLat").value =
-    src.startLatitude != null ? src.startLatitude.toFixed(6) : "—";
-  document.getElementById("startLng").value =
-    src.startLongitude != null ? src.startLongitude.toFixed(6) : "—";
+  syncDerivedFields();
   ensureRideTypeOption(data.rideType || "trail");
 
-  // Existing photos kept across an edit (removable). New uploads are staged
+  // Existing photos kept across an edit (removable). `path` is the Storage
+  // object path persisted in the doc; `display` is a transient download URL
+  // resolved only so the <img> can render. New uploads are staged
   // separately and compressed on selection.
-  const existingPhotos = []; // { url }
+  const existingPhotos = []; // { path, display }
   const newPhotos = []; // { blob, objectURL, name }
 
   if (isEdit) {
@@ -215,30 +254,147 @@
     document.getElementById("region").value = data.region || "";
     document.getElementById("description").value = data.description || "";
     if (data.difficulty) document.getElementById("difficulty").value = data.difficulty;
-    (data.photoURLs || data.photos || []).forEach((url) =>
-      existingPhotos.push({ url })
-    );
+    // isActive defaults true; only an explicit `false` unchecks it.
+    document.getElementById("isActive").checked = data.isActive !== false;
+    const storedPaths = data.photoURLs || data.photos || [];
+    for (const path of storedPaths) {
+      let display = "";
+      try {
+        display = await resolvePhotoDisplayURL(path);
+      } catch (e) {
+        console.warn("[publish] could not resolve photo", path, e.message || e);
+      }
+      existingPhotos.push({ path, display });
+    }
+  } else if (isManual) {
+    document.getElementById("page-title").textContent = "New Manual Trail";
+    document.getElementById("page-sub").textContent =
+      "Click the map to trace the route, then fill in the details.";
+    // Elevation gain has no source for a manual trail — admin enters feet.
+    const elev = document.getElementById("elevation");
+    elev.readOnly = false;
+    elev.type = "number";
+    elev.min = "0";
+    elev.step = "1";
+    elev.value = "0";
+    elev.placeholder = "0";
+    document.getElementById("route-req").hidden = false;
   }
+
+  document.querySelector(".bt-form-actions a").href = isRide
+    ? "/admin/my-rides.html"
+    : "/admin/trails.html";
 
   boot.remove();
   content.hidden = false;
 
-  // ---- Leaflet preview ----
+  // ---- Leaflet: static preview for ride/edit, draw tool for manual ----
   const mapHint = document.getElementById("map-hint");
-  if (coords.length && window.L) {
-    const map = L.map("map", { attributionControl: true });
+  const mapEl = document.getElementById("map");
+
+  let map = null;
+  if (window.L) {
+    map = L.map("map", { attributionControl: true });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
+  }
+
+  if (isManual) {
+    document.getElementById("route-tools").hidden = false;
+    if (!map) {
+      mapEl.style.display = "none";
+      mapHint.textContent =
+        "Map unavailable — paste an encoded polyline below to set the route.";
+    } else {
+      map.setView([39.5, -98.35], 4); // continental US overview
+      mapHint.textContent =
+        "Click the map to add route points. Distance and start are computed automatically.";
+    }
+
+    let routePts = [];
+    let layer = null;
+
+    function redraw() {
+      if (!map) return;
+      if (layer) {
+        layer.remove();
+        layer = null;
+      }
+      if (!routePts.length) return;
+      layer = L.layerGroup().addTo(map);
+      L.polyline(routePts, { color: "#FF6B00", weight: 4 }).addTo(layer);
+      routePts.forEach((p, i) =>
+        L.circleMarker(p, {
+          radius: i === 0 ? 6 : 4,
+          color: "#FF6B00",
+          fillColor: i === 0 ? "#FF6B00" : "#0A0A0A",
+          fillOpacity: 1,
+          weight: 2,
+        }).addTo(layer)
+      );
+      if (routePts.length >= 2) {
+        map.fitBounds(L.polyline(routePts).getBounds(), { padding: [24, 24] });
+      }
+    }
+
+    function recompute() {
+      // Standard precision-5 encode so it round-trips with iOS exactly.
+      src.polyline = routePts.length >= 2 ? encodePolyline(routePts) : "";
+      src.distanceMeters = routeDistanceMeters(routePts);
+      if (routePts.length) {
+        src.startLatitude = routePts[0][0];
+        src.startLongitude = routePts[0][1];
+      } else {
+        src.startLatitude = null;
+        src.startLongitude = null;
+      }
+      syncDerivedFields();
+    }
+
+    if (map) {
+      map.on("click", (e) => {
+        routePts.push([e.latlng.lat, e.latlng.lng]);
+        redraw();
+        recompute();
+      });
+    }
+    document.getElementById("route-undo").addEventListener("click", () => {
+      routePts.pop();
+      redraw();
+      recompute();
+    });
+    document.getElementById("route-clear").addEventListener("click", () => {
+      routePts = [];
+      redraw();
+      recompute();
+    });
+    document.getElementById("route-load").addEventListener("click", () => {
+      const pts = decodePolyline(
+        document.getElementById("route-paste").value.trim()
+      );
+      if (pts.length < 2) {
+        errEl.textContent =
+          "Couldn't decode that polyline — expecting a standard precision-5 string with 2+ points.";
+        return;
+      }
+      errEl.textContent = "";
+      routePts = pts;
+      redraw();
+      recompute();
+    });
+
+    recompute();
+  } else if (coords.length && map) {
     const line = L.polyline(coords, { color: "#FF6B00", weight: 4 }).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [20, 20] });
   } else {
-    document.getElementById("map").style.display = "none";
-    mapHint.textContent = coords.length
-      ? "Map library failed to load."
-      : "No route data available for this ride.";
+    mapEl.style.display = "none";
+    mapHint.textContent = window.L
+      ? "No route data available for this ride."
+      : "Map library failed to load.";
   }
 
   // ---- Photo grid ----
@@ -247,7 +403,7 @@
 
   function renderPhotos() {
     const items = [
-      ...existingPhotos.map((p, i) => ({ src: p.url, kind: "existing", i })),
+      ...existingPhotos.map((p, i) => ({ src: p.display, kind: "existing", i })),
       ...newPhotos.map((p, i) => ({ src: p.objectURL, kind: "new", i })),
     ];
     grid.innerHTML = items
@@ -317,12 +473,37 @@
       errEl.textContent = "Name and Region are required.";
       return;
     }
+    if (isManual) {
+      // Admin-entered elevation (feet -> meters); a number is required by
+      // the contract, 0 is acceptable.
+      src.elevationGainMeters = Math.max(
+        0,
+        feetToMeters(parseFloat(document.getElementById("elevation").value) || 0)
+      );
+      if (!src.polyline || !(src.distanceMeters > 0)) {
+        errEl.textContent =
+          "Draw a route with at least two points (or paste an encoded polyline).";
+        return;
+      }
+    }
+    // iOS Swift-casts startLatitude/startLongitude as non-optional numbers.
+    // Refuse to write null/garbage — that would fail to decode in the app.
+    if (
+      !Number.isFinite(src.startLatitude) ||
+      !Number.isFinite(src.startLongitude)
+    ) {
+      errEl.textContent = isManual
+        ? "Add the route first so a start point can be set."
+        : "No start coordinates: this ride has no decodable route, so it can't be published as a trail.";
+      return;
+    }
 
     submitBtn.disabled = true;
     submitBtn.textContent = isEdit ? "Saving…" : "Publishing…";
 
     try {
-      // Resolve the target doc + id.
+      // Reserve the doc id FIRST so photos live under verified_trails/<id>/
+      // and the doc can be written with their paths in one go.
       let trailRef;
       let targetId;
       if (isEdit) {
@@ -333,19 +514,20 @@
         targetId = trailRef.id;
       }
 
-      // Upload new photos; final list = kept existing + freshly uploaded.
-      const photoURLs = existingPhotos.map((p) => p.url);
+      // Final photoURLs = kept existing Storage paths + newly uploaded paths.
+      // Stored as Storage OBJECT PATHS (not download URLs) per the iOS
+      // contract. New file names are single path segments and timestamped
+      // so re-uploads never clobber a kept photo.
+      const photoURLs = existingPhotos.map((p) => p.path);
+      const stamp = Date.now();
       for (let i = 0; i < newPhotos.length; i++) {
-        const index = photoURLs.length + i;
-        // Per spec: verified_trails/{trailId}/{index}.jpg
-        const r = storageRef(
-          storage,
-          `verified_trails/${targetId}/${index}.jpg`
-        );
-        await uploadBytes(r, newPhotos[i].blob, { contentType: "image/jpeg" });
-        photoURLs.push(await getDownloadURL(r));
+        const fileName = `photo-${stamp}-${i + 1}.jpg`;
+        const path = await uploadTrailPhoto(targetId, fileName, newPhotos[i].blob);
+        photoURLs.push(path);
       }
 
+      // Only the fields iOS reads, with the exact keys/types from the
+      // contract. Editable on both create and edit:
       const editable = {
         name,
         region,
@@ -358,14 +540,14 @@
         startLatitude: src.startLatitude,
         startLongitude: src.startLongitude,
         photoURLs,
+        isActive: document.getElementById("isActive").checked,
       };
 
       if (isEdit) {
-        await updateDoc(trailRef, {
-          ...editable,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
+        // Preserve source/sourceRideId/sourceUserId/verifiedBy/verifiedAt
+        // already on the doc — an edit changes content, not provenance.
+        await updateDoc(trailRef, editable);
+      } else if (isRide) {
         await setDoc(trailRef, {
           ...editable,
           source: "user_ride",
@@ -373,8 +555,15 @@
           sourceUserId: user.uid,
           verifiedBy: user.uid,
           verifiedAt: serverTimestamp(),
-          addedAt: serverTimestamp(),
-          isActive: true,
+        });
+      } else {
+        // Manual entry: no source ride/user; importedFrom/originalFileName
+        // are reserved and intentionally left unset.
+        await setDoc(trailRef, {
+          ...editable,
+          source: "manual",
+          verifiedBy: user.uid,
+          verifiedAt: serverTimestamp(),
         });
       }
 

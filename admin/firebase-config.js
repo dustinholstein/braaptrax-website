@@ -1,4 +1,4 @@
-// BraapTrax Admin — public Firebase web config.
+// BraapTrax Admin — public Firebase web config (project: braaptrax-41ada).
 //
 // These values are NOT secrets. They identify the Firebase project to the
 // client SDK; all access control is enforced server-side by Firestore
@@ -6,14 +6,20 @@
 // deployed from the iOS app repo. Shipping these in a public static file
 // is the standard, supported Firebase web pattern.
 //
-// TODO(dustin): Replace every placeholder below with the real values from
-// Firebase Console → Project settings → Your apps → Web app config, then
-// commit. Until then auth/Firestore calls will fail by design.
+// Use the *Web* app's apiKey/appId from Firebase Console → Project settings
+// → Your apps → Web app. Do NOT reuse the iOS app's API key: it may be
+// bundle-id-restricted and would be rejected from a browser origin.
+//
+// TODO(dustin): paste the Web app's real apiKey and appId below (the only
+// two values that can't be derived). authDomain / projectId /
+// storageBucket / messagingSenderId are final and correct as-is — in
+// particular storageBucket uses the new ".firebasestorage.app" domain
+// verbatim; do NOT rewrite it to ".appspot.com".
 export const firebaseConfig = {
-  apiKey: "TODO_FIREBASE_API_KEY",
-  authDomain: "TODO_PROJECT.firebaseapp.com",
-  projectId: "TODO_PROJECT_ID",
-  storageBucket: "TODO_PROJECT.appspot.com",
-  messagingSenderId: "TODO_MESSAGING_SENDER_ID",
-  appId: "TODO_APP_ID",
+  apiKey: "PASTE_WEB_APP_API_KEY_HERE",
+  authDomain: "braaptrax-41ada.firebaseapp.com",
+  projectId: "braaptrax-41ada",
+  storageBucket: "braaptrax-41ada.firebasestorage.app",
+  messagingSenderId: "670354051007",
+  appId: "PASTE_WEB_APP_APP_ID_HERE",
 };

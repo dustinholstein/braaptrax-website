@@ -93,28 +93,34 @@ export function toMillis(v) {
   return d ? d.getTime() : 0;
 }
 
+// Must stay byte-identical to the iOS RideType enum raw values — the app
+// Swift-casts on these exact strings. Do not localize, reorder for meaning,
+// or add values the app doesn't know.
 export const RIDE_TYPES = [
   "trail",
-  "enduro",
   "motocross",
-  "single-track",
-  "dual-sport",
-  "adventure",
-  "other",
+  "desert",
+  "street",
+  "raceTrack",
+  "offroadTrail",
+  "snowmobile",
 ];
 
 const RIDE_TYPE_ICONS = {
   trail: "🌲",
-  enduro: "⛰️",
   motocross: "🏁",
-  "single-track": "🌿",
-  "dual-sport": "🛣️",
-  adventure: "🧭",
-  other: "🏍️",
+  desert: "🏜️",
+  street: "🛣️",
+  raceTrack: "🏎️",
+  offroadTrail: "⛰️",
+  snowmobile: "❄️",
 };
 
+// Raw values are case-sensitive (e.g. "raceTrack"); match exactly first,
+// then fall back to a lowercased lookup for forgiving display only.
 export function rideTypeIcon(t) {
-  return RIDE_TYPE_ICONS[String(t || "").toLowerCase()] || "🏍️";
+  const key = String(t == null ? "" : t);
+  return RIDE_TYPE_ICONS[key] || RIDE_TYPE_ICONS[key.toLowerCase()] || "🏍️";
 }
 
 export function escapeHtml(s) {
@@ -158,6 +164,58 @@ export function decodePolyline(str, precision = 5) {
     coords.push([lat / factor, lng / factor]);
   }
   return coords;
+}
+
+// Encode [[lat,lng],...] with the standard Google Encoded Polyline
+// Algorithm at the given precision (default 5 / 1e5). Round-trips exactly
+// with decodePolyline above and with the iOS PolylineEncoder. Used only for
+// manually-drawn routes; ride/edit polylines are passed through verbatim.
+export function encodePolyline(coords, precision = 5) {
+  const factor = Math.pow(10, precision);
+  const encodeSigned = (v) => {
+    let sgn = v < 0 ? ~(v << 1) : v << 1;
+    let out = "";
+    while (sgn >= 0x20) {
+      out += String.fromCharCode((0x20 | (sgn & 0x1f)) + 63);
+      sgn >>= 5;
+    }
+    out += String.fromCharCode(sgn + 63);
+    return out;
+  };
+  let prevLat = 0;
+  let prevLng = 0;
+  let result = "";
+  for (const [lat, lng] of coords || []) {
+    const late = Math.round(lat * factor);
+    const lnge = Math.round(lng * factor);
+    result += encodeSigned(late - prevLat);
+    result += encodeSigned(lnge - prevLng);
+    prevLat = late;
+    prevLng = lnge;
+  }
+  return result;
+}
+
+// Great-circle distance, meters.
+export function haversineMeters(a, b) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const la1 = toRad(a[0]);
+  const la2 = toRad(b[0]);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+export function routeDistanceMeters(coords) {
+  let d = 0;
+  for (let i = 1; i < (coords || []).length; i++) {
+    d += haversineMeters(coords[i - 1], coords[i]);
+  }
+  return d;
 }
 
 // ---- Client-side image compression ---------------------------------------
@@ -204,11 +262,25 @@ export function compressImage(file, maxDim = 1920, quality = 0.75) {
 export const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 export const MAX_PHOTOS = 10;
 
-export async function uploadTrailPhoto(trailId, index, blob) {
-  const path = `verified_trails/${trailId}/${index}.jpg`;
-  const r = storageRef(storage, path);
-  await uploadBytes(r, blob, { contentType: "image/jpeg" });
-  return await getDownloadURL(r);
+// Uploads one JPEG and returns the Storage OBJECT PATH (NOT a download URL).
+// iOS stores/loads verified-trail photos by Storage path, matching how ride
+// photos are stored elsewhere in the app; persisting an https URL here would
+// break the iOS image loader. {fileName} must be a single path segment
+// (Storage rules only expose verified_trails/{trailId}/{fileName}).
+export async function uploadTrailPhoto(trailId, fileName, blob) {
+  const path = `verified_trails/${trailId}/${fileName}`;
+  await uploadBytes(storageRef(storage, path), blob, {
+    contentType: "image/jpeg",
+  });
+  return path;
+}
+
+// Resolve a stored photoURLs entry to something an <img> can render.
+// New-style entries are Storage paths; tolerate legacy absolute URLs too.
+export async function resolvePhotoDisplayURL(stored) {
+  if (!stored) return "";
+  if (/^https?:\/\//i.test(stored)) return stored;
+  return await getDownloadURL(storageRef(storage, stored));
 }
 
 // ---- Toast ----------------------------------------------------------------
@@ -255,17 +327,12 @@ function injectNav(activeKey) {
 
   const links = NAV_ITEMS.map((item) => {
     const isActive = item.key === activeKey;
-    const isPublish = item.key === "publish";
-    // Publish is only reachable with a ride/trail selected. If we land on it
-    // without context it's handled by publish.html itself; in the nav it
-    // stays disabled until the admin picks a ride from My Rides.
-    const params = new URLSearchParams(location.search);
-    const hasContext =
-      isActive && (params.get("rideId") || params.get("trailId"));
-    if (isPublish && !isActive && !hasContext) {
-      return `<span class="bt-nav-link bt-nav-link--disabled" title="Pick a ride from My Rides to publish">${item.label}</span>`;
-    }
-    return `<a class="bt-nav-link${isActive ? " bt-nav-link--active" : ""}" href="${item.href}">${item.label}</a>`;
+    // "Publish" from the nav starts a manual (no-ride) trail entry.
+    // Ride-based publishing is reached via the buttons on My Rides, which
+    // pass ?rideId; editing passes ?trailId.
+    const href =
+      item.key === "publish" ? item.href + "?mode=manual" : item.href;
+    return `<a class="bt-nav-link${isActive ? " bt-nav-link--active" : ""}" href="${href}">${item.label}</a>`;
   }).join("");
 
   nav.innerHTML = `
