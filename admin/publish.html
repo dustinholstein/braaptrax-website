@@ -90,6 +90,14 @@
       <div class="bt-photos" id="photo-grid"></div>
     </div>
 
+    <div class="bt-field">
+      <label class="bt-label" for="isActive" style="display:flex;align-items:center;gap:0.6rem;cursor:pointer;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="isActive" checked style="width:auto;accent-color:var(--orange);">
+        <span>Active &mdash; visible in the BraapTrax app</span>
+      </label>
+      <span class="bt-hint">The app only shows trails where this is on. New trails default to active.</span>
+    </div>
+
     <div class="bt-error" id="form-error"></div>
     <div class="bt-form-actions">
       <button class="bt-btn bt-btn-primary" type="submit" id="submit-btn">Publish Trail</button>
@@ -105,12 +113,12 @@
 <script type="module">
   import {
     guardPage,
-    db, storage,
+    db,
     doc, collection, getDoc, setDoc, updateDoc, serverTimestamp,
-    storageRef, uploadBytes, getDownloadURL,
+    uploadTrailPhoto, resolvePhotoDisplayURL,
     decodePolyline, metersToMiles, metersToFeet,
     compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
-    RIDE_TYPES, queueToast, showToast, escapeHtml,
+    RIDE_TYPES, queueToast, escapeHtml,
   } from "/admin/admin.js";
 
   const { user } = await guardPage("publish");
@@ -201,9 +209,11 @@
     src.startLongitude != null ? src.startLongitude.toFixed(6) : "—";
   ensureRideTypeOption(data.rideType || "trail");
 
-  // Existing photos kept across an edit (removable). New uploads are staged
+  // Existing photos kept across an edit (removable). `path` is the Storage
+  // object path persisted in the doc; `display` is a transient download URL
+  // resolved only so the <img> can render. New uploads are staged
   // separately and compressed on selection.
-  const existingPhotos = []; // { url }
+  const existingPhotos = []; // { path, display }
   const newPhotos = []; // { blob, objectURL, name }
 
   if (isEdit) {
@@ -215,9 +225,18 @@
     document.getElementById("region").value = data.region || "";
     document.getElementById("description").value = data.description || "";
     if (data.difficulty) document.getElementById("difficulty").value = data.difficulty;
-    (data.photoURLs || data.photos || []).forEach((url) =>
-      existingPhotos.push({ url })
-    );
+    // isActive defaults true; only an explicit `false` unchecks it.
+    document.getElementById("isActive").checked = data.isActive !== false;
+    const storedPaths = data.photoURLs || data.photos || [];
+    for (const path of storedPaths) {
+      let display = "";
+      try {
+        display = await resolvePhotoDisplayURL(path);
+      } catch (e) {
+        console.warn("[publish] could not resolve photo", path, e.message || e);
+      }
+      existingPhotos.push({ path, display });
+    }
   }
 
   boot.remove();
@@ -247,7 +266,7 @@
 
   function renderPhotos() {
     const items = [
-      ...existingPhotos.map((p, i) => ({ src: p.url, kind: "existing", i })),
+      ...existingPhotos.map((p, i) => ({ src: p.display, kind: "existing", i })),
       ...newPhotos.map((p, i) => ({ src: p.objectURL, kind: "new", i })),
     ];
     grid.innerHTML = items
@@ -317,12 +336,23 @@
       errEl.textContent = "Name and Region are required.";
       return;
     }
+    // iOS Swift-casts startLatitude/startLongitude as non-optional numbers.
+    // Refuse to write null/garbage — that would fail to decode in the app.
+    if (
+      !Number.isFinite(src.startLatitude) ||
+      !Number.isFinite(src.startLongitude)
+    ) {
+      errEl.textContent =
+        "No start coordinates: this ride has no decodable route, so it can't be published as a trail.";
+      return;
+    }
 
     submitBtn.disabled = true;
     submitBtn.textContent = isEdit ? "Saving…" : "Publishing…";
 
     try {
-      // Resolve the target doc + id.
+      // Reserve the doc id FIRST so photos live under verified_trails/<id>/
+      // and the doc can be written with their paths in one go.
       let trailRef;
       let targetId;
       if (isEdit) {
@@ -333,19 +363,20 @@
         targetId = trailRef.id;
       }
 
-      // Upload new photos; final list = kept existing + freshly uploaded.
-      const photoURLs = existingPhotos.map((p) => p.url);
+      // Final photoURLs = kept existing Storage paths + newly uploaded paths.
+      // Stored as Storage OBJECT PATHS (not download URLs) per the iOS
+      // contract. New file names are single path segments and timestamped
+      // so re-uploads never clobber a kept photo.
+      const photoURLs = existingPhotos.map((p) => p.path);
+      const stamp = Date.now();
       for (let i = 0; i < newPhotos.length; i++) {
-        const index = photoURLs.length + i;
-        // Per spec: verified_trails/{trailId}/{index}.jpg
-        const r = storageRef(
-          storage,
-          `verified_trails/${targetId}/${index}.jpg`
-        );
-        await uploadBytes(r, newPhotos[i].blob, { contentType: "image/jpeg" });
-        photoURLs.push(await getDownloadURL(r));
+        const fileName = `photo-${stamp}-${i + 1}.jpg`;
+        const path = await uploadTrailPhoto(targetId, fileName, newPhotos[i].blob);
+        photoURLs.push(path);
       }
 
+      // Only the fields iOS reads, with the exact keys/types from the
+      // contract. Editable on both create and edit:
       const editable = {
         name,
         region,
@@ -358,13 +389,13 @@
         startLatitude: src.startLatitude,
         startLongitude: src.startLongitude,
         photoURLs,
+        isActive: document.getElementById("isActive").checked,
       };
 
       if (isEdit) {
-        await updateDoc(trailRef, {
-          ...editable,
-          updatedAt: serverTimestamp(),
-        });
+        // Preserve source/sourceRideId/sourceUserId/verifiedBy/verifiedAt
+        // already on the doc — an edit changes content, not provenance.
+        await updateDoc(trailRef, editable);
       } else {
         await setDoc(trailRef, {
           ...editable,
@@ -373,8 +404,6 @@
           sourceUserId: user.uid,
           verifiedBy: user.uid,
           verifiedAt: serverTimestamp(),
-          addedAt: serverTimestamp(),
-          isActive: true,
         });
       }
 

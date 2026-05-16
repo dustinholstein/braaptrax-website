@@ -93,28 +93,34 @@ export function toMillis(v) {
   return d ? d.getTime() : 0;
 }
 
+// Must stay byte-identical to the iOS RideType enum raw values — the app
+// Swift-casts on these exact strings. Do not localize, reorder for meaning,
+// or add values the app doesn't know.
 export const RIDE_TYPES = [
   "trail",
-  "enduro",
   "motocross",
-  "single-track",
-  "dual-sport",
-  "adventure",
-  "other",
+  "desert",
+  "street",
+  "raceTrack",
+  "offroadTrail",
+  "snowmobile",
 ];
 
 const RIDE_TYPE_ICONS = {
   trail: "🌲",
-  enduro: "⛰️",
   motocross: "🏁",
-  "single-track": "🌿",
-  "dual-sport": "🛣️",
-  adventure: "🧭",
-  other: "🏍️",
+  desert: "🏜️",
+  street: "🛣️",
+  raceTrack: "🏎️",
+  offroadTrail: "⛰️",
+  snowmobile: "❄️",
 };
 
+// Raw values are case-sensitive (e.g. "raceTrack"); match exactly first,
+// then fall back to a lowercased lookup for forgiving display only.
 export function rideTypeIcon(t) {
-  return RIDE_TYPE_ICONS[String(t || "").toLowerCase()] || "🏍️";
+  const key = String(t == null ? "" : t);
+  return RIDE_TYPE_ICONS[key] || RIDE_TYPE_ICONS[key.toLowerCase()] || "🏍️";
 }
 
 export function escapeHtml(s) {
@@ -204,11 +210,25 @@ export function compressImage(file, maxDim = 1920, quality = 0.75) {
 export const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 export const MAX_PHOTOS = 10;
 
-export async function uploadTrailPhoto(trailId, index, blob) {
-  const path = `verified_trails/${trailId}/${index}.jpg`;
-  const r = storageRef(storage, path);
-  await uploadBytes(r, blob, { contentType: "image/jpeg" });
-  return await getDownloadURL(r);
+// Uploads one JPEG and returns the Storage OBJECT PATH (NOT a download URL).
+// iOS stores/loads verified-trail photos by Storage path, matching how ride
+// photos are stored elsewhere in the app; persisting an https URL here would
+// break the iOS image loader. {fileName} must be a single path segment
+// (Storage rules only expose verified_trails/{trailId}/{fileName}).
+export async function uploadTrailPhoto(trailId, fileName, blob) {
+  const path = `verified_trails/${trailId}/${fileName}`;
+  await uploadBytes(storageRef(storage, path), blob, {
+    contentType: "image/jpeg",
+  });
+  return path;
+}
+
+// Resolve a stored photoURLs entry to something an <img> can render.
+// New-style entries are Storage paths; tolerate legacy absolute URLs too.
+export async function resolvePhotoDisplayURL(stored) {
+  if (!stored) return "";
+  if (/^https?:\/\//i.test(stored)) return stored;
+  return await getDownloadURL(storageRef(storage, stored));
 }
 
 // ---- Toast ----------------------------------------------------------------
