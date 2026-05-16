@@ -197,9 +197,19 @@
     data = snap.data();
 
     // ---- Prefill from ride / existing trail ----
-    src.distanceMeters = Number(data.distanceMeters) || 0;
-    src.elevationGainMeters = Number(data.elevationGainMeters) || 0;
-    src.polyline = data.polyline || data.encodedPolyline || "";
+    // The `rides` collection uses distance/elevationGain (meters) and
+    // `encodedPolyline`; `verifiedTrails` uses the contract keys
+    // distanceMeters/elevationGainMeters/polyline. Map per source so the
+    // values written to the trail always use the contract keys.
+    if (isEdit) {
+      src.distanceMeters = Number(data.distanceMeters) || 0;
+      src.elevationGainMeters = Number(data.elevationGainMeters) || 0;
+      src.polyline = data.polyline || "";
+    } else {
+      src.distanceMeters = Number(data.distance) || 0;
+      src.elevationGainMeters = Number(data.elevationGain) || 0;
+      src.polyline = data.encodedPolyline || data.polyline || "";
+    }
     coords = decodePolyline(src.polyline);
     if (coords.length) {
       src.startLatitude = coords[0][0];
@@ -279,6 +289,14 @@
     elev.value = "0";
     elev.placeholder = "0";
     document.getElementById("route-req").hidden = false;
+  }
+
+  if (isRide) {
+    // Sensible defaults from the ride; admin can override before publishing.
+    document.getElementById("name").value = (data.trailName || "").trim();
+    if (data.description) {
+      document.getElementById("description").value = data.description;
+    }
   }
 
   document.querySelector(".bt-form-actions a").href = isRide

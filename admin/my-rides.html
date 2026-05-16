@@ -55,19 +55,22 @@
   let allDocs = [];
 
   function rideRow(id, r) {
-    const miles = metersToMiles(r.distanceMeters).toFixed(1);
-    const feet = Math.round(metersToFeet(r.elevationGainMeters));
-    const place = r.city || r.region || r.locationName || "";
+    // iOS `rides` schema: distance/elevationGain are in METERS,
+    // the human label is `trailName`, route is `encodedPolyline`.
+    const miles = metersToMiles(r.distance).toFixed(1);
+    const feet = Math.round(metersToFeet(r.elevationGain));
+    const when = formatDate(r.createdAt || r.startTime || r.date);
+    const title = (r.trailName && String(r.trailName).trim()) || when;
     return `
       <div class="bt-row">
         <div class="bt-row-icon">${rideTypeIcon(r.rideType)}</div>
         <div class="bt-row-main">
-          <div class="bt-row-title">${formatDate(r.createdAt || r.startedAt || r.date)}</div>
+          <div class="bt-row-title">${escapeHtml(title)}</div>
           <div class="bt-row-meta">
+            <span>${when}</span>
             <span>${escapeHtml(r.rideType || "ride")}</span>
             <span>${miles} mi</span>
             <span>${feet.toLocaleString()} ft gain</span>
-            ${place ? `<span>${escapeHtml(place)}</span>` : ""}
           </div>
         </div>
         <div class="bt-row-actions">
@@ -114,8 +117,8 @@
     );
     allDocs = snap.docs.slice().sort(
       (a, b) =>
-        toMillis(b.data().createdAt || b.data().startedAt) -
-        toMillis(a.data().createdAt || a.data().startedAt)
+        toMillis(b.data().createdAt || b.data().startTime) -
+        toMillis(a.data().createdAt || a.data().startTime)
     );
     renderClientPage();
   }
