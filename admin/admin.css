@@ -262,6 +262,24 @@ a { color: var(--orange); }
 }
 .leaflet-container { background: var(--bg2); }
 
+/* Editable route vertex handles */
+.bt-vtx {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #0A0A0A;
+  border: 2px solid var(--orange);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+}
+.bt-vtx--start {
+  width: 16px;
+  height: 16px;
+  background: var(--orange);
+}
+.leaflet-marker-draggable:active .bt-vtx { cursor: grabbing; }
+
 /* ---- Photo previews ---- */
 .bt-photos {
   display: grid;

@@ -30,7 +30,8 @@
       <span class="bt-hint" id="map-hint"></span>
       <div id="route-tools" hidden>
         <div class="bt-row-actions" style="margin-top:.6rem">
-          <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-undo">Undo point</button>
+          <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-undo">Undo</button>
+          <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-reset" hidden>Reset to original</button>
           <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-clear">Clear route</button>
         </div>
         <details style="margin-top:.75rem">
@@ -306,114 +307,234 @@
   boot.remove();
   content.hidden = false;
 
-  // ---- Leaflet: static preview for ride/edit, draw tool for manual ----
+  // ---- Leaflet: editable route in every mode ----
+  // Drag a point to move it, click a point to delete it, click the line to
+  // insert a point, click empty map to append. Undo / Reset / Clear too.
   const mapHint = document.getElementById("map-hint");
   const mapEl = document.getElementById("map");
 
   let map = null;
   if (window.L) {
     map = L.map("map", { attributionControl: true });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+    // Free, key-less satellite imagery (default) with a Streets toggle.
+    const sat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      {
+        maxZoom: 19,
+        attribution:
+          "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+      }
+    );
+    const streets = L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        maxZoom: 19,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }
+    );
+    sat.addTo(map);
+    L.control.layers({ Satellite: sat, Streets: streets }).addTo(map);
   }
 
-  if (isManual) {
-    document.getElementById("route-tools").hidden = false;
-    if (!map) {
-      mapEl.style.display = "none";
-      mapHint.textContent =
-        "Map unavailable — paste an encoded polyline below to set the route.";
-    } else {
-      map.setView([39.5, -98.35], 4); // continental US overview
-      mapHint.textContent =
-        "Click the map to add route points. Distance and start are computed automatically.";
+  // Route state. Seeded from the decoded source route (ride/edit) or empty
+  // (manual). Editing makes it "dirty" so the polyline + distance get
+  // recomputed; while pristine, ride/edit keep the exact source values.
+  let routePts = coords.map((c) => [c[0], c[1]]);
+  const originalPts = routePts.map((p) => [p[0], p[1]]);
+  const srcPolyline0 = src.polyline;
+  const srcDistance0 = src.distanceMeters;
+  let dirty = false;
+  const history = [];
+
+  function snapshot() {
+    history.push(routePts.map((p) => [p[0], p[1]]));
+    if (history.length > 100) history.shift();
+  }
+
+  let routeLine = null;
+  let vertexMarkers = [];
+  let suppressMapClick = false;
+
+  function vIcon(isStart) {
+    return L.divIcon({
+      className: "",
+      html: `<span class="bt-vtx${isStart ? " bt-vtx--start" : ""}"></span>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+  }
+
+  function redrawAll() {
+    if (!map) return;
+    if (routeLine) {
+      routeLine.remove();
+      routeLine = null;
     }
+    vertexMarkers.forEach((m) => m.remove());
+    vertexMarkers = [];
+    if (!routePts.length) return;
 
-    let routePts = [];
-    let layer = null;
-
-    function redraw() {
-      if (!map) return;
-      if (layer) {
-        layer.remove();
-        layer = null;
+    routeLine = L.polyline(routePts, { color: "#FF6B00", weight: 4 }).addTo(map);
+    routeLine.on("click", (e) => {
+      // Insert a vertex into the nearest segment at the click point.
+      L.DomEvent.stop(e);
+      suppressMapClick = true;
+      setTimeout(() => (suppressMapClick = false), 0);
+      const pt = [e.latlng.lat, e.latlng.lng];
+      let bestI = 1;
+      let bestD = Infinity;
+      for (let i = 1; i < routePts.length; i++) {
+        const mid = [
+          (routePts[i - 1][0] + routePts[i][0]) / 2,
+          (routePts[i - 1][1] + routePts[i][1]) / 2,
+        ];
+        const d = (mid[0] - pt[0]) ** 2 + (mid[1] - pt[1]) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          bestI = i;
+        }
       }
-      if (!routePts.length) return;
-      layer = L.layerGroup().addTo(map);
-      L.polyline(routePts, { color: "#FF6B00", weight: 4 }).addTo(layer);
-      routePts.forEach((p, i) =>
-        L.circleMarker(p, {
-          radius: i === 0 ? 6 : 4,
-          color: "#FF6B00",
-          fillColor: i === 0 ? "#FF6B00" : "#0A0A0A",
-          fillOpacity: 1,
-          weight: 2,
-        }).addTo(layer)
-      );
-      if (routePts.length >= 2) {
-        map.fitBounds(L.polyline(routePts).getBounds(), { padding: [24, 24] });
-      }
-    }
+      snapshot();
+      routePts.splice(bestI, 0, pt);
+      dirty = true;
+      redrawAll();
+      recompute();
+    });
 
-    function recompute() {
-      // Standard precision-5 encode so it round-trips with iOS exactly.
-      src.polyline = routePts.length >= 2 ? encodePolyline(routePts) : "";
-      src.distanceMeters = routeDistanceMeters(routePts);
-      if (routePts.length) {
-        src.startLatitude = routePts[0][0];
-        src.startLongitude = routePts[0][1];
-      } else {
-        src.startLatitude = null;
-        src.startLongitude = null;
-      }
-      syncDerivedFields();
-    }
-
-    if (map) {
-      map.on("click", (e) => {
-        routePts.push([e.latlng.lat, e.latlng.lng]);
-        redraw();
+    routePts.forEach((p, i) => {
+      const mk = L.marker(p, {
+        draggable: true,
+        icon: vIcon(i === 0),
+        title:
+          i === 0 ? "Start — drag to move, click to delete" : "Drag to move, click to delete",
+      }).addTo(map);
+      mk.on("dragstart", snapshot);
+      mk.on("drag", (e) => {
+        const ll = e.target.getLatLng();
+        routePts[i] = [ll.lat, ll.lng];
+        if (routeLine) routeLine.setLatLngs(routePts);
+      });
+      mk.on("dragend", () => {
+        dirty = true;
         recompute();
       });
-    }
-    document.getElementById("route-undo").addEventListener("click", () => {
-      routePts.pop();
-      redraw();
-      recompute();
+      mk.on("click", (e) => {
+        L.DomEvent.stop(e);
+        snapshot();
+        routePts.splice(i, 1);
+        dirty = true;
+        redrawAll();
+        recompute();
+      });
+      vertexMarkers.push(mk);
     });
-    document.getElementById("route-clear").addEventListener("click", () => {
-      routePts = [];
-      redraw();
-      recompute();
-    });
-    document.getElementById("route-load").addEventListener("click", () => {
-      const pts = decodePolyline(
-        document.getElementById("route-paste").value.trim()
-      );
-      if (pts.length < 2) {
-        errEl.textContent =
-          "Couldn't decode that polyline — expecting a standard precision-5 string with 2+ points.";
-        return;
-      }
-      errEl.textContent = "";
-      routePts = pts;
-      redraw();
-      recompute();
-    });
+  }
 
-    recompute();
-  } else if (coords.length && map) {
-    const line = L.polyline(coords, { color: "#FF6B00", weight: 4 }).addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [20, 20] });
-  } else {
+  function fitView() {
+    if (!map || !routePts.length) return;
+    if (routePts.length === 1) {
+      map.setView(routePts[0], 14);
+    } else {
+      map.fitBounds(L.polyline(routePts).getBounds(), { padding: [24, 24] });
+    }
+  }
+
+  function recompute() {
+    if (isManual || dirty) {
+      // Standard precision-5 encode → round-trips with iOS exactly.
+      src.polyline = routePts.length >= 2 ? encodePolyline(routePts) : "";
+      src.distanceMeters = routeDistanceMeters(routePts);
+    } else {
+      // Untouched ride/edit route: keep the exact recorded values.
+      src.polyline = srcPolyline0;
+      src.distanceMeters = srcDistance0;
+    }
+    if (routePts.length) {
+      src.startLatitude = routePts[0][0];
+      src.startLongitude = routePts[0][1];
+    } else {
+      src.startLatitude = null;
+      src.startLongitude = null;
+    }
+    syncDerivedFields();
+    if (!isManual) {
+      mapHint.textContent = dirty
+        ? "Route edited — distance recalculated from the edited line."
+        : "Drag a point to move it · click a point to delete · click the line to insert · click the map to extend.";
+    }
+  }
+
+  document.getElementById("route-tools").hidden = false;
+  const resetBtn = document.getElementById("route-reset");
+  if (originalPts.length) resetBtn.hidden = false;
+
+  if (!map) {
     mapEl.style.display = "none";
     mapHint.textContent = window.L
-      ? "No route data available for this ride."
-      : "Map library failed to load.";
+      ? "Map unavailable — paste an encoded polyline below to set the route."
+      : "Map library failed to load — paste an encoded polyline below.";
+  } else {
+    if (routePts.length) {
+      redrawAll();
+      fitView();
+    } else {
+      map.setView([39.5, -98.35], 4); // continental US overview
+    }
+    map.on("click", (e) => {
+      if (suppressMapClick) return;
+      snapshot();
+      routePts.push([e.latlng.lat, e.latlng.lng]);
+      dirty = true;
+      redrawAll();
+      recompute();
+    });
+    mapHint.textContent = isManual
+      ? "Click the map to add route points. Distance and start are computed automatically."
+      : "Drag a point to move it · click a point to delete · click the line to insert · click the map to extend.";
   }
+
+  document.getElementById("route-undo").addEventListener("click", () => {
+    if (!history.length) return;
+    routePts = history.pop();
+    dirty = true;
+    redrawAll();
+    recompute();
+  });
+  resetBtn.addEventListener("click", () => {
+    snapshot();
+    routePts = originalPts.map((p) => [p[0], p[1]]);
+    dirty = false;
+    redrawAll();
+    fitView();
+    recompute();
+  });
+  document.getElementById("route-clear").addEventListener("click", () => {
+    snapshot();
+    routePts = [];
+    dirty = true;
+    redrawAll();
+    recompute();
+  });
+  document.getElementById("route-load").addEventListener("click", () => {
+    const pts = decodePolyline(
+      document.getElementById("route-paste").value.trim()
+    );
+    if (pts.length < 2) {
+      errEl.textContent =
+        "Couldn't decode that polyline — expecting a standard precision-5 string with 2+ points.";
+      return;
+    }
+    errEl.textContent = "";
+    snapshot();
+    routePts = pts;
+    dirty = true;
+    redrawAll();
+    fitView();
+    recompute();
+  });
+
+  recompute();
 
   // ---- Photo grid ----
   const grid = document.getElementById("photo-grid");
@@ -498,11 +619,13 @@
         0,
         feetToMeters(parseFloat(document.getElementById("elevation").value) || 0)
       );
-      if (!src.polyline || !(src.distanceMeters > 0)) {
-        errEl.textContent =
-          "Draw a route with at least two points (or paste an encoded polyline).";
-        return;
-      }
+    }
+    // A verified trail must have a route (the route is editable in every
+    // mode, so this also catches clearing/deleting all points).
+    if (!src.polyline) {
+      errEl.textContent =
+        "A route is required — keep, draw, or paste at least two points.";
+      return;
     }
     // iOS Swift-casts startLatitude/startLongitude as non-optional numbers.
     // Refuse to write null/garbage — that would fail to decode in the app.
@@ -510,9 +633,7 @@
       !Number.isFinite(src.startLatitude) ||
       !Number.isFinite(src.startLongitude)
     ) {
-      errEl.textContent = isManual
-        ? "Add the route first so a start point can be set."
-        : "No start coordinates: this ride has no decodable route, so it can't be published as a trail.";
+      errEl.textContent = "Route has no valid start point.";
       return;
     }
 
