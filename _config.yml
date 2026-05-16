@@ -1,0 +1,23 @@
+# BraapTrax website — GitHub Pages config.
+#
+# The /admin/ panel is a self-contained static app (hand-written HTML + ES
+# modules + Firebase/Leaflet from CDN). It must be served byte-for-byte so
+# Liquid never touches its JavaScript (e.g. `${...}` template literals).
+#
+# A root `.nojekyll` file is what actually guarantees that on GitHub Pages:
+# it disables the Jekyll build entirely, so every file — the public site and
+# /admin/ alike — is published exactly as committed. That is safe here
+# because this whole repo is plain static HTML with no Liquid or front
+# matter. `.nojekyll` is authoritative; if it is ever removed and Jekyll is
+# re-enabled, the settings below keep /admin/ as raw, unprocessed static:
+#
+#   - `keep_files` retains the directory verbatim in the published output
+#     (it is never cleaned or regenerated).
+#   - admin files intentionally have no YAML front matter, so Jekyll already
+#     treats them as static files and copies them without Liquid processing.
+#
+# NOTE: do NOT put `admin` under `exclude:` — Jekyll's `exclude` drops files
+# from the build output entirely, which would un-publish the admin panel.
+
+keep_files:
+  - admin

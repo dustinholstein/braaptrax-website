@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Trails — BraapTrax Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div class="bt-wrap" id="content" hidden>
+  <div class="bt-header">
+    <div class="bt-eyebrow">Admin</div>
+    <h1 class="bt-title">Verified Trails</h1>
+    <p class="bt-sub">Manage every published verified trail. Sorted by region, then name.</p>
+  </div>
+  <div id="trails"></div>
+  <div class="bt-center" id="more-wrap" hidden>
+    <button class="bt-btn bt-btn-ghost" id="more-btn">Load more</button>
+  </div>
+</div>
+
+<div class="bt-wrap" id="boot">
+  <div class="bt-loading"><span class="bt-spinner"></span></div>
+</div>
+
+<script type="module">
+  import {
+    guardPage,
+    db, storage,
+    collection, query, orderBy, limit, startAfter, getDocs,
+    doc, updateDoc, deleteDoc,
+    storageRef, listAll, deleteObject,
+    rideTypeIcon, escapeHtml, showToast,
+  } from "/admin/admin.js";
+
+  const PAGE_SIZE = 50;
+  await guardPage("trails");
+
+  document.getElementById("boot").remove();
+  const content = document.getElementById("content");
+  content.hidden = false;
+
+  const trailsEl = document.getElementById("trails");
+  const moreWrap = document.getElementById("more-wrap");
+  const moreBtn = document.getElementById("more-btn");
+
+  let lastDoc = null;
+  let exhausted = false;
+  const loaded = new Map(); // id -> data
+
+  const SOURCE_LABEL = {
+    user_ride: "From Ride",
+    manual: "Manual",
+    imported: "Imported",
+  };
+
+  function trailRow(id, t) {
+    const diff = (t.difficulty || "").toLowerCase();
+    const active = t.isActive !== false;
+    const srcLabel = SOURCE_LABEL[t.source] || (t.source ? escapeHtml(t.source) : "Manual");
+    return `
+      <div class="bt-row" data-id="${id}">
+        <div class="bt-row-icon">${rideTypeIcon(t.rideType)}</div>
+        <div class="bt-row-main">
+          <div class="bt-row-title">${escapeHtml(t.name || "(untitled)")}</div>
+          <div class="bt-row-meta">
+            <span>${escapeHtml(t.region || "—")}</span>
+            ${diff ? `<span class="bt-badge bt-badge--${diff}">${escapeHtml(diff)}</span>` : ""}
+            <span class="bt-badge bt-badge--source">${srcLabel}</span>
+            <span class="bt-badge bt-badge--${active ? "active" : "inactive"}">${active ? "Active" : "Inactive"}</span>
+          </div>
+        </div>
+        <div class="bt-row-actions">
+          <a class="bt-btn bt-btn-ghost bt-btn-sm" href="/admin/publish.html?trailId=${encodeURIComponent(id)}">Edit</a>
+          <button class="bt-btn bt-btn-ghost bt-btn-sm" data-act="toggle" data-id="${id}">${active ? "Deactivate" : "Reactivate"}</button>
+          <button class="bt-btn bt-btn-danger bt-btn-sm" data-act="delete" data-id="${id}">Delete</button>
+        </div>
+      </div>`;
+  }
+
+  function render() {
+    const rows = [...loaded.entries()].sort((a, b) => {
+      const ra = (a[1].region || "").toLowerCase();
+      const rb = (b[1].region || "").toLowerCase();
+      if (ra !== rb) return ra < rb ? -1 : 1;
+      const na = (a[1].name || "").toLowerCase();
+      const nb = (b[1].name || "").toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    if (rows.length === 0) {
+      trailsEl.innerHTML = `<div class="bt-empty">No verified trails yet. Publish one from My Rides.</div>`;
+      return;
+    }
+    trailsEl.innerHTML =
+      `<div class="bt-list">` +
+      rows.map(([id, t]) => trailRow(id, t)).join("") +
+      `</div>`;
+  }
+
+  async function load() {
+    if (exhausted) return;
+    let q = query(
+      collection(db, "verifiedTrails"),
+      orderBy("region"),
+      limit(PAGE_SIZE)
+    );
+    if (lastDoc) q = query(q, startAfter(lastDoc));
+    try {
+      const snap = await getDocs(q);
+      snap.forEach((d) => loaded.set(d.id, d.data()));
+      lastDoc = snap.docs[snap.docs.length - 1] || lastDoc;
+      if (snap.size < PAGE_SIZE) exhausted = true;
+      moreWrap.hidden = exhausted;
+      render();
+    } catch (e) {
+      console.error(e);
+      trailsEl.innerHTML = `<div class="bt-empty">Couldn't load trails. ${escapeHtml(e.message || e)}</div>`;
+    }
+  }
+
+  async function deleteTrailPhotos(id) {
+    try {
+      const folder = storageRef(storage, `verified_trails/${id}`);
+      const res = await listAll(folder);
+      await Promise.all(res.items.map((item) => deleteObject(item)));
+    } catch (e) {
+      // Folder may not exist (no photos) — non-fatal.
+      console.warn("[trails] photo cleanup:", e.message || e);
+    }
+  }
+
+  trailsEl.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const act = btn.dataset.act;
+
+    if (act === "toggle") {
+      const t = loaded.get(id);
+      const next = !(t.isActive !== false);
+      btn.disabled = true;
+      try {
+        await updateDoc(doc(db, "verifiedTrails", id), { isActive: next });
+        t.isActive = next;
+        render();
+        showToast(next ? "Trail reactivated." : "Trail deactivated.");
+      } catch (err) {
+        console.error(err);
+        showToast("Update failed.", "error");
+        btn.disabled = false;
+      }
+    }
+
+    if (act === "delete") {
+      const t = loaded.get(id);
+      if (!confirm(`Delete "${t.name || id}"? This removes the trail and its photos permanently.`)) {
+        return;
+      }
+      btn.disabled = true;
+      try {
+        await deleteDoc(doc(db, "verifiedTrails", id));
+        await deleteTrailPhotos(id);
+        loaded.delete(id);
+        render();
+        showToast("Trail deleted.");
+      } catch (err) {
+        console.error(err);
+        showToast("Delete failed.", "error");
+        btn.disabled = false;
+      }
+    }
+  });
+
+  moreBtn.addEventListener("click", async () => {
+    moreBtn.disabled = true;
+    moreBtn.textContent = "Loading…";
+    await load();
+    moreBtn.disabled = false;
+    moreBtn.textContent = "Load more";
+  });
+
+  await load();
+</script>
+
+</body>
+</html>
