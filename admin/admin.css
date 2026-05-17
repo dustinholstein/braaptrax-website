@@ -294,6 +294,25 @@ body.bt-noscroll #route-tools {
 }
 .leaflet-container { background: var(--bg2); }
 
+/* Trim-route controls */
+.bt-trim {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg2);
+}
+.bt-trim input[type="range"] {
+  width: 100%;
+  accent-color: var(--orange);
+  margin: 0 0 0.4rem;
+}
+.bt-trim .bt-label { margin: 0; }
+#trim-readout { margin: 0.2rem 0 0.6rem; }
+
 /* ---- Import dropzone ---- */
 .bt-drop {
   border: 2px dashed var(--border-strong);
