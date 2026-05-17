@@ -34,6 +34,17 @@
           <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-reset" hidden>Reset to original</button>
           <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="route-clear">Clear route</button>
         </div>
+        <details id="trim-box" style="margin-top:.75rem">
+          <summary class="bt-hint" style="cursor:pointer">Trim start / end (cut campsite approach, etc.)</summary>
+          <div class="bt-trim">
+            <label class="bt-label" for="trim-start">Start point: <span id="trim-start-val">1</span></label>
+            <input type="range" id="trim-start" min="0" value="0" step="1">
+            <label class="bt-label" for="trim-end">End point: <span id="trim-end-val">1</span></label>
+            <input type="range" id="trim-end" min="0" value="0" step="1">
+            <p class="bt-hint" id="trim-readout"></p>
+            <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="trim-apply">Apply trim</button>
+          </div>
+        </details>
         <details style="margin-top:.75rem">
           <summary class="bt-hint" style="cursor:pointer">…or paste an encoded polyline (standard, precision&nbsp;5)</summary>
           <textarea class="bt-textarea" id="route-paste" style="min-height:64px;margin-top:.5rem"></textarea>
@@ -566,6 +577,106 @@
     snapshot();
     routePts = pts;
     dirty = true;
+    redrawAll();
+    fitView();
+    recompute();
+  });
+
+  // ---- Trim start / end ----
+  // Slice off a leading/trailing chunk (e.g. the ride from a campsite to
+  // the real trailhead). Live preview: dashed grey = will be cut.
+  const trimBox = document.getElementById("trim-box");
+  const trimStart = document.getElementById("trim-start");
+  const trimEnd = document.getElementById("trim-end");
+  const trimStartVal = document.getElementById("trim-start-val");
+  const trimEndVal = document.getElementById("trim-end-val");
+  const trimReadout = document.getElementById("trim-readout");
+  const trimApply = document.getElementById("trim-apply");
+  let trimLayer = null;
+
+  function clearTrimPreview() {
+    if (trimLayer) {
+      trimLayer.remove();
+      trimLayer = null;
+    }
+  }
+
+  function drawTrimPreview(s, e) {
+    if (!map) return;
+    clearTrimPreview();
+    trimLayer = L.layerGroup().addTo(map);
+    const cut = { color: "#888", weight: 3, dashArray: "4 7", opacity: 0.9 };
+    if (s > 0) {
+      L.polyline(routePts.slice(0, s + 1), cut).addTo(trimLayer);
+    }
+    if (e < routePts.length - 1) {
+      L.polyline(routePts.slice(e), cut).addTo(trimLayer);
+    }
+    L.circleMarker(routePts[s], {
+      radius: 7, color: "#46B17B", fillColor: "#46B17B", fillOpacity: 1, weight: 2,
+    }).addTo(trimLayer);
+    L.circleMarker(routePts[e], {
+      radius: 7, color: "#E5484D", fillColor: "#E5484D", fillOpacity: 1, weight: 2,
+    }).addTo(trimLayer);
+  }
+
+  function updateTrim(movedEnd) {
+    const n = routePts.length;
+    let s = parseInt(trimStart.value, 10) || 0;
+    let e = parseInt(trimEnd.value, 10) || 0;
+    if (s >= e) {
+      if (movedEnd) s = Math.max(0, e - 1);
+      else e = Math.min(n - 1, s + 1);
+      trimStart.value = s;
+      trimEnd.value = e;
+    }
+    trimStartVal.textContent = s + 1;
+    trimEndVal.textContent = e + 1;
+    const keptMi = metersToMiles(
+      routeDistanceMeters(routePts.slice(s, e + 1))
+    ).toFixed(2);
+    trimReadout.textContent =
+      `Keep points ${s + 1}–${e + 1} of ${n} · ${keptMi} mi ` +
+      `(cuts ${s} from start, ${n - 1 - e} from end)`;
+    drawTrimPreview(s, e);
+  }
+
+  function initTrim() {
+    const n = routePts.length;
+    if (n < 3) {
+      trimStart.max = trimEnd.max = Math.max(0, n - 1);
+      trimApply.disabled = true;
+      trimReadout.textContent = "Need at least 3 points to trim.";
+      clearTrimPreview();
+      return;
+    }
+    trimApply.disabled = false;
+    trimStart.max = trimEnd.max = n - 1;
+    trimStart.value = 0;
+    trimEnd.value = n - 1;
+    updateTrim(false);
+  }
+
+  trimStart.addEventListener("input", () => updateTrim(false));
+  trimEnd.addEventListener("input", () => updateTrim(true));
+  trimBox.addEventListener("toggle", () => {
+    if (trimBox.open) initTrim();
+    else clearTrimPreview();
+  });
+  trimApply.addEventListener("click", () => {
+    const n = routePts.length;
+    const s = parseInt(trimStart.value, 10) || 0;
+    const e = parseInt(trimEnd.value, 10) || 0;
+    if (n < 3 || s >= e || (s === 0 && e === n - 1)) {
+      clearTrimPreview();
+      trimBox.open = false;
+      return;
+    }
+    snapshot();
+    routePts = routePts.slice(s, e + 1);
+    dirty = true;
+    clearTrimPreview();
+    trimBox.open = false;
     redrawAll();
     fitView();
     recompute();
