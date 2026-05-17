@@ -37,10 +37,18 @@
         <details id="trim-box" style="margin-top:.75rem">
           <summary class="bt-hint" style="cursor:pointer">Trim start / end (cut campsite approach, etc.)</summary>
           <div class="bt-trim">
-            <label class="bt-label" for="trim-start">Start point: <span id="trim-start-val">1</span></label>
-            <input type="range" id="trim-start" min="0" value="0" step="1">
-            <label class="bt-label" for="trim-end">End point: <span id="trim-end-val">1</span></label>
-            <input type="range" id="trim-end" min="0" value="0" step="1">
+            <label class="bt-label" for="trim-start">Start (green): point <span id="trim-start-val">1</span></label>
+            <div class="bt-trim-row">
+              <button type="button" class="bt-nudge" id="trim-start-dec" aria-label="Start back one point">&minus;</button>
+              <input type="range" id="trim-start" min="0" value="0" step="1">
+              <button type="button" class="bt-nudge" id="trim-start-inc" aria-label="Start forward one point">+</button>
+            </div>
+            <label class="bt-label" for="trim-end">End (red): point <span id="trim-end-val">1</span></label>
+            <div class="bt-trim-row">
+              <button type="button" class="bt-nudge" id="trim-end-dec" aria-label="End back one point">&minus;</button>
+              <input type="range" id="trim-end" min="0" value="0" step="1">
+              <button type="button" class="bt-nudge" id="trim-end-inc" aria-label="End forward one point">+</button>
+            </div>
             <p class="bt-hint" id="trim-readout"></p>
             <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="trim-apply">Apply trim</button>
           </div>
@@ -594,42 +602,88 @@
   const trimApply = document.getElementById("trim-apply");
   let trimLayer = null;
 
+  function trimPaneReady() {
+    if (!map) return;
+    if (!map.getPane("trimPane")) {
+      const p = map.createPane("trimPane");
+      p.style.zIndex = 680; // above route line + vertex handles
+    }
+  }
+
+  function setVerticesVisible(v) {
+    vertexMarkers.forEach((m) => m.setOpacity(v ? 1 : 0));
+  }
+
   function clearTrimPreview() {
     if (trimLayer) {
       trimLayer.remove();
       trimLayer = null;
     }
+    setVerticesVisible(true);
   }
 
   function drawTrimPreview(s, e) {
     if (!map) return;
-    clearTrimPreview();
+    trimPaneReady();
+    if (trimLayer) trimLayer.remove();
     trimLayer = L.layerGroup().addTo(map);
-    const cut = { color: "#888", weight: 3, dashArray: "4 7", opacity: 0.9 };
-    if (s > 0) {
-      L.polyline(routePts.slice(0, s + 1), cut).addTo(trimLayer);
-    }
+    // Hide the dense orange vertex handles so they can't bury the trim
+    // markers; the route still shows as the orange line underneath.
+    setVerticesVisible(false);
+
+    const cut = {
+      pane: "trimPane",
+      color: "#9aa0a6",
+      weight: 3,
+      dashArray: "3 8",
+      opacity: 0.95,
+    };
+    if (s > 0) L.polyline(routePts.slice(0, s + 1), cut).addTo(trimLayer);
     if (e < routePts.length - 1) {
       L.polyline(routePts.slice(e), cut).addTo(trimLayer);
     }
-    L.circleMarker(routePts[s], {
-      radius: 7, color: "#46B17B", fillColor: "#46B17B", fillOpacity: 1, weight: 2,
+    // Bright "kept" highlight over the portion that survives.
+    L.polyline(routePts.slice(s, e + 1), {
+      pane: "trimPane",
+      color: "#FFFFFF",
+      weight: 5,
+      opacity: 0.9,
     }).addTo(trimLayer);
-    L.circleMarker(routePts[e], {
-      radius: 7, color: "#E5484D", fillColor: "#E5484D", fillOpacity: 1, weight: 2,
-    }).addTo(trimLayer);
+
+    const handle = (pt, fill, label) => {
+      L.circleMarker(pt, {
+        pane: "trimPane",
+        radius: 10,
+        color: "#FFFFFF",
+        weight: 3,
+        fillColor: fill,
+        fillOpacity: 1,
+      })
+        .addTo(trimLayer)
+        .bindTooltip(label, {
+          permanent: true,
+          direction: "top",
+          className: "bt-trim-tip",
+          pane: "trimPane",
+        });
+    };
+    handle(routePts[s], "#46B17B", "START");
+    handle(routePts[e], "#E5484D", "END");
   }
 
-  function updateTrim(movedEnd) {
+  // source: "start" | "end" | null. Clamps so start < end, updates the
+  // readout/preview, and pans the map to the handle being adjusted so it
+  // stays in view for fine-tuning.
+  function updateTrim(source) {
     const n = routePts.length;
     let s = parseInt(trimStart.value, 10) || 0;
     let e = parseInt(trimEnd.value, 10) || 0;
     if (s >= e) {
-      if (movedEnd) s = Math.max(0, e - 1);
+      if (source === "end") s = Math.max(0, e - 1);
       else e = Math.min(n - 1, s + 1);
-      trimStart.value = s;
-      trimEnd.value = e;
     }
+    trimStart.value = s;
+    trimEnd.value = e;
     trimStartVal.textContent = s + 1;
     trimEndVal.textContent = e + 1;
     const keptMi = metersToMiles(
@@ -639,6 +693,9 @@
       `Keep points ${s + 1}–${e + 1} of ${n} · ${keptMi} mi ` +
       `(cuts ${s} from start, ${n - 1 - e} from end)`;
     drawTrimPreview(s, e);
+    if (map && source) {
+      map.panTo(routePts[source === "end" ? e : s], { animate: true, duration: 0.2 });
+    }
   }
 
   function initTrim() {
@@ -654,11 +711,22 @@
     trimStart.max = trimEnd.max = n - 1;
     trimStart.value = 0;
     trimEnd.value = n - 1;
-    updateTrim(false);
+    if (map) fitView();
+    updateTrim(null);
   }
 
-  trimStart.addEventListener("input", () => updateTrim(false));
-  trimEnd.addEventListener("input", () => updateTrim(true));
+  function nudge(input, delta, source) {
+    const max = parseInt(input.max, 10) || 0;
+    input.value = Math.min(max, Math.max(0, (parseInt(input.value, 10) || 0) + delta));
+    updateTrim(source);
+  }
+
+  trimStart.addEventListener("input", () => updateTrim("start"));
+  trimEnd.addEventListener("input", () => updateTrim("end"));
+  document.getElementById("trim-start-dec").addEventListener("click", () => nudge(trimStart, -1, "start"));
+  document.getElementById("trim-start-inc").addEventListener("click", () => nudge(trimStart, 1, "start"));
+  document.getElementById("trim-end-dec").addEventListener("click", () => nudge(trimEnd, -1, "end"));
+  document.getElementById("trim-end-inc").addEventListener("click", () => nudge(trimEnd, 1, "end"));
   trimBox.addEventListener("toggle", () => {
     if (trimBox.open) initTrim();
     else clearTrimPreview();
