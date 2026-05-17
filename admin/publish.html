@@ -335,6 +335,41 @@
     );
     sat.addTo(map);
     L.control.layers({ Satellite: sat, Streets: streets }).addTo(map);
+
+    // Fullscreen toggle for precise route editing.
+    let fsLink;
+    function toggleFull() {
+      const full = mapEl.classList.toggle("bt-map--full");
+      document.body.classList.toggle("bt-noscroll", full);
+      if (fsLink) {
+        fsLink.innerHTML = full ? "&#10005;" : "&#9974;";
+        fsLink.title = full ? "Exit full screen (Esc)" : "Full screen";
+      }
+      setTimeout(() => map.invalidateSize(), 60);
+    }
+    const FsControl = L.Control.extend({
+      options: { position: "topright" },
+      onAdd() {
+        const wrap = L.DomUtil.create("div", "leaflet-bar bt-fs");
+        fsLink = L.DomUtil.create("a", "", wrap);
+        fsLink.href = "#";
+        fsLink.role = "button";
+        fsLink.innerHTML = "&#9974;";
+        fsLink.title = "Full screen";
+        L.DomEvent.disableClickPropagation(wrap);
+        L.DomEvent.on(fsLink, "click", (e) => {
+          L.DomEvent.stop(e);
+          toggleFull();
+        });
+        return wrap;
+      },
+    });
+    map.addControl(new FsControl());
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && mapEl.classList.contains("bt-map--full")) {
+        toggleFull();
+      }
+    });
   }
 
   // Route state. Seeded from the decoded source route (ride/edit) or empty

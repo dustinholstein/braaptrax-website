@@ -254,11 +254,43 @@ a { color: var(--orange); }
 
 /* ---- Map ---- */
 .bt-map {
-  height: 320px;
+  height: 70vh;
+  min-height: 460px;
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--bg2);
+}
+/* Fullscreen route editing */
+.bt-map.bt-map--full {
+  position: fixed;
+  inset: 0;
+  height: 100vh;
+  min-height: 0;
+  width: 100vw;
+  z-index: 2000;
+  border: none;
+  border-radius: 0;
+}
+body.bt-noscroll { overflow: hidden; }
+/* While fullscreen, float the route tools over the map so Undo / Reset /
+   Clear stay reachable without exiting. */
+body.bt-noscroll #route-tools {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 2001;
+  background: rgba(17, 17, 17, 0.95);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  max-width: min(92vw, 640px);
+}
+.bt-fs a {
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
 }
 .leaflet-container { background: var(--bg2); }
 
