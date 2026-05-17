@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Draw a Trail — BraapTrax Admin</title>
+<!--
+  The hand-drawing tool already lives in publish.html's manual mode
+  (click-to-add, drag-to-move, click/right-click to delete, undo, clear,
+  live distance, satellite + fullscreen). Rather than maintain a second
+  copy of that ~600-line editor, "Draw" routes there. preserves any
+  ?query/#hash so deep links keep working.
+-->
+<meta http-equiv="refresh" content="0; url=/admin/publish.html?mode=manual">
+<link rel="stylesheet" href="/admin/admin.css">
+<script>
+  location.replace("/admin/publish.html?mode=manual" + location.hash);
+</script>
+</head>
+<body>
+<div class="bt-wrap">
+  <p class="bt-sub">Opening the trail editor…
+    <a href="/admin/publish.html?mode=manual">Continue</a>
+  </p>
+</div>
+</body>
+</html>

@@ -134,8 +134,6 @@
     RIDE_TYPES, queueToast, escapeHtml,
   } from "/admin/admin.js";
 
-  const { user } = await guardPage("publish");
-
   const params = new URLSearchParams(location.search);
   const rideId = params.get("rideId");
   const trailId = params.get("trailId");
@@ -143,6 +141,10 @@
   const isRide = !isEdit && !!rideId;
   // No ride and no trail -> manual (no-ride) entry: admin draws the route.
   const isManual = !isEdit && !isRide;
+
+  // Highlight "Draw" in the nav for manual entry (this page is the editor
+  // that /admin/manual.html redirects to).
+  const { user } = await guardPage(isManual ? "draw" : "publish");
 
   // Populate the ride-type dropdown.
   const rideTypeSel = document.getElementById("rideType");
