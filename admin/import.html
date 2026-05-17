@@ -81,7 +81,8 @@
       </div>
       <div class="bt-field">
         <label class="bt-label" for="elevation">Elevation Gain (feet)</label>
-        <input class="bt-input" type="text" id="elevation" readonly>
+        <input class="bt-input" type="number" id="elevation" min="0" step="1" value="0" placeholder="0">
+        <span class="bt-hint" id="elev-hint"></span>
       </div>
     </div>
 
@@ -118,7 +119,7 @@
     doc, collection, setDoc, serverTimestamp,
     uploadTrailPhoto, compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, encodePolyline, routeDistanceMeters, elevationGainMeters,
-    metersToMiles, metersToFeet, queueToast, escapeHtml,
+    metersToMiles, metersToFeet, feetToMeters, queueToast, escapeHtml,
   } from "/admin/admin.js";
   import { parseTrackFile } from "/admin/admin-import.js";
 
@@ -262,10 +263,16 @@
 
     const latlngs = track.points.map((p) => [p.lat, p.lng]);
     const meters = routeDistanceMeters(latlngs);
+    const hasEle = track.points.some(
+      (p) => typeof p.ele === "number" && isFinite(p.ele)
+    );
     const gain = elevationGainMeters(track.points.map((p) => p.ele));
     document.getElementById("distance").value = metersToMiles(meters).toFixed(2);
     document.getElementById("elevation").value = String(Math.round(metersToFeet(gain)));
-    statsEl.textContent = `${escapeHtml(track.name)} — ${track.points.length} points · ${metersToMiles(meters).toFixed(2)} mi · ${Math.round(metersToFeet(gain)).toLocaleString()} ft gain`;
+    document.getElementById("elev-hint").textContent = hasEle
+      ? "Computed from the file's elevation data — edit if you know better."
+      : "This file has no elevation data (2D geometry) — enter feet manually if known.";
+    statsEl.textContent = `${escapeHtml(track.name)} — ${track.points.length} points · ${metersToMiles(meters).toFixed(2)} mi${hasEle ? ` · ${Math.round(metersToFeet(gain)).toLocaleString()} ft gain` : " · no elevation in file"}`;
     if (!document.getElementById("name").value) {
       document.getElementById("name").value = track.name.replace(/ ·.*$/, "");
     }
@@ -376,8 +383,11 @@
         difficulty: document.getElementById("difficulty").value,
         rideType: rideTypeSel.value,
         distanceMeters: routeDistanceMeters(latlngs),
-        elevationGainMeters: elevationGainMeters(
-          selected.points.map((p) => p.ele)
+        // From the editable field (feet -> meters): prefilled from the
+        // file's elevation when present, otherwise admin-entered.
+        elevationGainMeters: Math.max(
+          0,
+          feetToMeters(parseFloat(document.getElementById("elevation").value) || 0)
         ),
         polyline,
         startLatitude: start[0],
