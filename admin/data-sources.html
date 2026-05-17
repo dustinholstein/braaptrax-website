@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Data Sources — BraapTrax Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div class="bt-wrap" id="content" hidden>
+  <div class="bt-header">
+    <div class="bt-eyebrow">Admin · Reference</div>
+    <h1 class="bt-title">Public Data Sources</h1>
+    <p class="bt-sub">Where to get trail/route data and how to convert it to a
+      GPX you can upload on the <a href="/admin/import.html">Import</a> page.
+      Tracks are never merged — split big datasets per trail before importing.</p>
+  </div>
+
+  <div class="bt-doc">
+    <section>
+      <h2>USFS Motor Vehicle Use Maps (MVUM)</h2>
+      <p>National Forest motorized roads &amp; trails. On the page look for
+        <em>“Motor Vehicle Use Map: Roads”</em> and
+        <em>“Motor Vehicle Use Map: Trails.”</em></p>
+      <ul>
+        <li><strong>Source:</strong> <a href="https://data.fs.usda.gov/geodata/edw/datasets.php" target="_blank" rel="noopener">data.fs.usda.gov/geodata/edw/datasets.php</a></li>
+        <li><strong>Format:</strong> shapefile, one per National Forest</li>
+        <li><strong>Convert:</strong></li>
+      </ul>
+      <pre class="bt-code">ogr2ogr -f GPX output.gpx input.shp -nlt LINESTRING -dsco GPX_USE_EXTENSIONS=YES</pre>
+    </section>
+
+    <section>
+      <h2>BLM Recreation / Route Data</h2>
+      <ul>
+        <li><strong>Source:</strong> <a href="https://gis.blm.gov/EGISDownload/LayerPackages/" target="_blank" rel="noopener">gis.blm.gov/EGISDownload/LayerPackages/</a></li>
+        <li><strong>Format:</strong> shapefile</li>
+        <li><strong>Convert:</strong> same <code>ogr2ogr</code> command as above</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Colorado Parks &amp; Wildlife — OHV Trails</h2>
+      <ul>
+        <li><strong>Source:</strong> <a href="https://cpw.state.co.us/learn/Pages/OHVTrails.aspx" target="_blank" rel="noopener">cpw.state.co.us/learn/Pages/OHVTrails.aspx</a></li>
+        <li><strong>Format:</strong> varies — sometimes GPX (upload directly),
+          sometimes shapefile (convert with the <code>ogr2ogr</code> command above)</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Utah State Parks — OHV</h2>
+      <ul>
+        <li><strong>Source:</strong> <a href="https://stateparks.utah.gov/activities/ohv/" target="_blank" rel="noopener">stateparks.utah.gov/activities/ohv/</a></li>
+        <li><strong>Format:</strong> varies — GPX directly, or convert a shapefile as above</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>OpenStreetMap (Overpass Turbo)</h2>
+      <ul>
+        <li><strong>Source:</strong> <a href="https://overpass-turbo.eu/" target="_blank" rel="noopener">overpass-turbo.eu</a></li>
+        <li><strong>Format:</strong> run the query, then <em>Export → GPX</em> from the Overpass Turbo UI</li>
+      </ul>
+      <p>Sample query — moto-legal trails inside the current bounding box:</p>
+      <pre class="bt-code">[out:xml][timeout:25];
+(
+  way["highway"="track"]["motor_vehicle"!="no"]["motorcycle"!="no"]({{bbox}});
+  way["highway"="path"]["motorcycle"="yes"]({{bbox}});
+);
+out body;
+&gt;;
+out skel qt;</pre>
+      <p class="bt-callout"><strong>Attribution required.</strong> OSM-derived
+        data must credit <code>© OpenStreetMap contributors</code>. When a
+        trail comes from OSM, include that credit in the trail
+        <em>Description</em> before publishing.</p>
+    </section>
+
+    <section>
+      <h2>Installing <code>ogr2ogr</code> (GDAL)</h2>
+      <ul>
+        <li><strong>macOS:</strong> <code>brew install gdal</code></li>
+        <li><strong>Windows:</strong> <a href="https://gdal.org/download.html" target="_blank" rel="noopener">gdal.org/download.html</a></li>
+      </ul>
+      <p class="bt-hint">After converting, upload the resulting <code>.gpx</code>
+        on the <a href="/admin/import.html">Import</a> page, pick the track,
+        fill in name/region/difficulty, and publish.</p>
+    </section>
+  </div>
+</div>
+
+<div class="bt-wrap" id="boot">
+  <div class="bt-loading"><span class="bt-spinner"></span></div>
+</div>
+
+<script type="module">
+  import { guardPage } from "/admin/admin.js";
+  await guardPage("data-sources");
+  document.getElementById("boot").remove();
+  document.getElementById("content").hidden = false;
+</script>
+
+</body>
+</html>

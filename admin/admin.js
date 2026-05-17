@@ -47,8 +47,10 @@ const LOGIN_PAGE = ADMIN_BASE + "index.html";
 
 export const NAV_ITEMS = [
   { key: "my-rides", label: "My Rides", href: ADMIN_BASE + "my-rides.html" },
-  { key: "publish", label: "Publish", href: ADMIN_BASE + "publish.html" },
+  { key: "import", label: "Import", href: ADMIN_BASE + "import.html" },
+  { key: "draw", label: "Draw", href: ADMIN_BASE + "manual.html" },
   { key: "trails", label: "Trails", href: ADMIN_BASE + "trails.html" },
+  { key: "data-sources", label: "Data Sources", href: ADMIN_BASE + "data-sources.html" },
 ];
 
 // ---- Formatting helpers ---------------------------------------------------
@@ -218,6 +220,32 @@ export function routeDistanceMeters(coords) {
   return d;
 }
 
+// Sum of positive elevation deltas after a centered N-point moving-average
+// smoothing pass (default 3) to suppress GPS/barometer noise. Used for
+// GPX/KML imports that carry per-point elevation.
+export function elevationGainMeters(eles, windowSize = 3) {
+  const xs = (eles || []).filter((e) => typeof e === "number" && isFinite(e));
+  if (xs.length < 2) return 0;
+  const half = Math.max(0, Math.floor(windowSize / 2));
+  const smoothed = xs.map((_, i) => {
+    let sum = 0;
+    let n = 0;
+    for (let j = i - half; j <= i + half; j++) {
+      if (j >= 0 && j < xs.length) {
+        sum += xs[j];
+        n++;
+      }
+    }
+    return sum / n;
+  });
+  let gain = 0;
+  for (let i = 1; i < smoothed.length; i++) {
+    const delta = smoothed[i] - smoothed[i - 1];
+    if (delta > 0) gain += delta;
+  }
+  return gain;
+}
+
 // ---- Client-side image compression ---------------------------------------
 // Resize so the longest side is <= maxDim, re-encode as JPEG at `quality`.
 // Resolves with a Blob. The caller is responsible for the >5MB rejection so
@@ -327,12 +355,7 @@ function injectNav(activeKey) {
 
   const links = NAV_ITEMS.map((item) => {
     const isActive = item.key === activeKey;
-    // "Publish" from the nav starts a manual (no-ride) trail entry.
-    // Ride-based publishing is reached via the buttons on My Rides, which
-    // pass ?rideId; editing passes ?trailId.
-    const href =
-      item.key === "publish" ? item.href + "?mode=manual" : item.href;
-    return `<a class="bt-nav-link${isActive ? " bt-nav-link--active" : ""}" href="${href}">${item.label}</a>`;
+    return `<a class="bt-nav-link${isActive ? " bt-nav-link--active" : ""}" href="${item.href}">${item.label}</a>`;
   }).join("");
 
   nav.innerHTML = `

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Import GPX / KML — BraapTrax Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div class="bt-wrap" id="content" hidden>
+  <div class="bt-header">
+    <div class="bt-eyebrow">Admin</div>
+    <h1 class="bt-title">Import GPX / KML</h1>
+    <p class="bt-sub">Upload a track file, pick a segment, then publish it as a verified trail.</p>
+  </div>
+
+  <div class="bt-drop" id="drop">
+    <input type="file" id="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" hidden>
+    <p class="bt-drop-title">Drop a .gpx or .kml file here</p>
+    <p class="bt-hint">or <button type="button" class="bt-link" id="browse">browse</button> · max 4&nbsp;MB · tracks are never merged</p>
+    <p class="bt-error" id="file-error"></p>
+  </div>
+
+  <div id="picker" hidden style="margin-top:1.5rem">
+    <span class="bt-label">This file has multiple tracks — pick one</span>
+    <div class="bt-list" id="picker-list" style="margin-top:.5rem"></div>
+  </div>
+
+  <form class="bt-form" id="trail-form" novalidate hidden style="margin-top:1.5rem">
+    <div class="bt-field">
+      <span class="bt-label">Route Preview</span>
+      <div class="bt-map" id="map"></div>
+      <span class="bt-hint" id="stats"></span>
+    </div>
+
+    <div class="bt-grid-2">
+      <div class="bt-field">
+        <label class="bt-label" for="name">Name <span class="req">*</span></label>
+        <input class="bt-input" type="text" id="name" maxlength="120" required>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="region">Region <span class="req">*</span></label>
+        <input class="bt-input" type="text" id="region" placeholder="Moab, UT" maxlength="120" required>
+      </div>
+    </div>
+
+    <div class="bt-field">
+      <label class="bt-label" for="description">Description</label>
+      <textarea class="bt-textarea" id="description" maxlength="2000"></textarea>
+    </div>
+
+    <div class="bt-grid-2">
+      <div class="bt-field">
+        <label class="bt-label" for="difficulty">Difficulty</label>
+        <select class="bt-select" id="difficulty">
+          <option value="beginner">Beginner</option>
+          <option value="intermediate">Intermediate</option>
+          <option value="advanced">Advanced</option>
+          <option value="expert">Expert</option>
+        </select>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="rideType">Ride Type</label>
+        <select class="bt-select" id="rideType"></select>
+      </div>
+    </div>
+
+    <div class="bt-grid-2">
+      <div class="bt-field">
+        <label class="bt-label" for="distance">Distance (miles)</label>
+        <input class="bt-input" type="text" id="distance" readonly>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="elevation">Elevation Gain (feet)</label>
+        <input class="bt-input" type="text" id="elevation" readonly>
+      </div>
+    </div>
+
+    <div class="bt-field">
+      <label class="bt-label" for="photos">Photos <span class="bt-hint">(max 10 · resized to 1920px · JPEG)</span></label>
+      <input type="file" id="photos" accept="image/*" multiple>
+      <div class="bt-photos" id="photo-grid"></div>
+    </div>
+
+    <div class="bt-field">
+      <label class="bt-label" for="isActive" style="display:flex;align-items:center;gap:0.6rem;cursor:pointer;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="isActive" checked style="width:auto;accent-color:var(--orange);">
+        <span>Active &mdash; visible in the BraapTrax app</span>
+      </label>
+      <span class="bt-hint">The app only shows trails where this is on. New trails default to active.</span>
+    </div>
+
+    <div class="bt-error" id="form-error"></div>
+    <div class="bt-form-actions">
+      <button class="bt-btn bt-btn-primary" type="submit" id="submit-btn">Publish Imported Trail</button>
+      <a class="bt-btn bt-btn-ghost" href="/admin/trails.html">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<div class="bt-wrap" id="boot">
+  <div class="bt-loading"><span class="bt-spinner"></span></div>
+</div>
+
+<script type="module">
+  import {
+    guardPage,
+    db,
+    doc, collection, setDoc, serverTimestamp,
+    uploadTrailPhoto, compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
+    RIDE_TYPES, encodePolyline, routeDistanceMeters, elevationGainMeters,
+    metersToMiles, metersToFeet, queueToast, escapeHtml,
+  } from "/admin/admin.js";
+  import { parseTrackFile } from "/admin/admin-import.js";
+
+  const MAX_FILE_BYTES = 4 * 1024 * 1024;
+  const { user } = await guardPage("import");
+
+  document.getElementById("boot").remove();
+  document.getElementById("content").hidden = false;
+
+  const rideTypeSel = document.getElementById("rideType");
+  rideTypeSel.innerHTML = RIDE_TYPES.map(
+    (t) => `<option value="${t}">${t}</option>`
+  ).join("");
+
+  const drop = document.getElementById("drop");
+  const fileInput = document.getElementById("file");
+  const fileError = document.getElementById("file-error");
+  const picker = document.getElementById("picker");
+  const pickerList = document.getElementById("picker-list");
+  const form = document.getElementById("trail-form");
+  const statsEl = document.getElementById("stats");
+  const errEl = document.getElementById("form-error");
+
+  let importKind = ""; // "gpx" | "kml"
+  let originalFileName = "";
+  let selected = null; // { name, points: [{lat,lng,ele?}] }
+
+  // ---- File intake ----
+  document.getElementById("browse").addEventListener("click", () => fileInput.click());
+  drop.addEventListener("click", (e) => {
+    if (e.target.closest("#browse")) return;
+    fileInput.click();
+  });
+  ["dragover", "dragenter"].forEach((ev) =>
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      drop.classList.add("bt-drop--over");
+    })
+  );
+  ["dragleave", "drop"].forEach((ev) =>
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      drop.classList.remove("bt-drop--over");
+    })
+  );
+  drop.addEventListener("drop", (e) => {
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  async function handleFile(file) {
+    fileError.textContent = "";
+    picker.hidden = true;
+    form.hidden = true;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith(".gpx") && !lower.endsWith(".kml")) {
+      fileError.textContent = "Only .gpx or .kml files are supported.";
+      return;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      fileError.textContent = "File is over the 4 MB limit.";
+      return;
+    }
+    let result;
+    try {
+      result = parseTrackFile(file.name, await file.text());
+    } catch (err) {
+      console.error(err);
+      fileError.textContent = "Couldn't parse file: " + (err.message || err);
+      return;
+    }
+    if (!result.tracks.length) {
+      fileError.textContent =
+        "No usable track/route found in this file (need a line with 2+ points).";
+      return;
+    }
+    importKind = result.kind;
+    originalFileName = file.name;
+
+    if (result.tracks.length === 1) {
+      chooseTrack(result.tracks[0]);
+    } else {
+      pickerList.innerHTML = result.tracks
+        .map((t, i) => {
+          const dist = metersToMiles(
+            routeDistanceMeters(t.points.map((p) => [p.lat, p.lng]))
+          ).toFixed(1);
+          return `<div class="bt-row">
+            <div class="bt-row-main">
+              <div class="bt-row-title">${escapeHtml(t.name)}</div>
+              <div class="bt-row-meta"><span>${t.points.length} points</span><span>${dist} mi</span></div>
+            </div>
+            <div class="bt-row-actions">
+              <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" data-i="${i}">Use this</button>
+            </div>
+          </div>`;
+        })
+        .join("");
+      picker.hidden = false;
+      pickerList.querySelectorAll("button[data-i]").forEach((b) =>
+        b.addEventListener("click", () =>
+          chooseTrack(result.tracks[Number(b.dataset.i)])
+        )
+      );
+    }
+  }
+
+  // ---- Map preview ----
+  let map = null;
+  let line = null;
+  function ensureMap() {
+    if (map || !window.L) return;
+    map = L.map("map", { attributionControl: true });
+    const sat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      {
+        maxZoom: 19,
+        attribution:
+          "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+      }
+    );
+    const streets = L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        maxZoom: 19,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }
+    );
+    sat.addTo(map);
+    L.control.layers({ Satellite: sat, Streets: streets }).addTo(map);
+  }
+
+  function chooseTrack(track) {
+    selected = track;
+    picker.hidden = true;
+    form.hidden = false;
+
+    const latlngs = track.points.map((p) => [p.lat, p.lng]);
+    const meters = routeDistanceMeters(latlngs);
+    const gain = elevationGainMeters(track.points.map((p) => p.ele));
+    document.getElementById("distance").value = metersToMiles(meters).toFixed(2);
+    document.getElementById("elevation").value = String(Math.round(metersToFeet(gain)));
+    statsEl.textContent = `${escapeHtml(track.name)} — ${track.points.length} points · ${metersToMiles(meters).toFixed(2)} mi · ${Math.round(metersToFeet(gain)).toLocaleString()} ft gain`;
+    if (!document.getElementById("name").value) {
+      document.getElementById("name").value = track.name.replace(/ ·.*$/, "");
+    }
+
+    ensureMap();
+    if (map) {
+      if (line) line.remove();
+      line = L.polyline(latlngs, { color: "#FF6B00", weight: 4 }).addTo(map);
+      map.fitBounds(line.getBounds(), { padding: [24, 24] });
+      setTimeout(() => map.invalidateSize(), 60);
+    } else {
+      document.getElementById("map").style.display = "none";
+    }
+  }
+
+  // ---- Photos (same pattern as publish.html) ----
+  const grid = document.getElementById("photo-grid");
+  const photoInput = document.getElementById("photos");
+  const newPhotos = [];
+
+  function renderPhotos() {
+    grid.innerHTML = newPhotos
+      .map(
+        (p, i) => `<div class="bt-photo">
+          <img src="${escapeHtml(p.objectURL)}" alt="">
+          <button type="button" class="bt-photo-remove" data-i="${i}" aria-label="Remove photo">&times;</button>
+        </div>`
+      )
+      .join("");
+  }
+  grid.addEventListener("click", (e) => {
+    const btn = e.target.closest(".bt-photo-remove");
+    if (!btn) return;
+    const i = Number(btn.dataset.i);
+    URL.revokeObjectURL(newPhotos[i].objectURL);
+    newPhotos.splice(i, 1);
+    renderPhotos();
+  });
+  photoInput.addEventListener("change", async () => {
+    errEl.textContent = "";
+    const files = [...photoInput.files];
+    photoInput.value = "";
+    for (const file of files) {
+      if (newPhotos.length >= MAX_PHOTOS) {
+        errEl.textContent = `Maximum ${MAX_PHOTOS} photos.`;
+        break;
+      }
+      try {
+        const blob = await compressImage(file);
+        if (blob.size > MAX_PHOTO_BYTES) {
+          errEl.textContent = `"${file.name}" is still over 5MB after compression and was skipped.`;
+          continue;
+        }
+        newPhotos.push({ blob, objectURL: URL.createObjectURL(blob) });
+        renderPhotos();
+      } catch (err) {
+        console.error(err);
+        errEl.textContent = `Couldn't process "${file.name}".`;
+      }
+    }
+  });
+
+  // ---- Submit ----
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errEl.textContent = "";
+    if (!selected) {
+      errEl.textContent = "Pick a track first.";
+      return;
+    }
+    const name = document.getElementById("name").value.trim();
+    const region = document.getElementById("region").value.trim();
+    if (!name || !region) {
+      errEl.textContent = "Name and Region are required.";
+      return;
+    }
+    const latlngs = selected.points.map((p) => [p.lat, p.lng]);
+    const polyline = encodePolyline(latlngs);
+    const start = latlngs[0];
+    if (!polyline || !Number.isFinite(start[0]) || !Number.isFinite(start[1])) {
+      errEl.textContent = "Imported track has no valid coordinates.";
+      return;
+    }
+
+    const submitBtn = document.getElementById("submit-btn");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Publishing…";
+    try {
+      // Reserve the doc id first so photos live under verified_trails/<id>/.
+      const trailRef = doc(collection(db, "verifiedTrails"));
+      const targetId = trailRef.id;
+
+      const photoURLs = [];
+      const stamp = Date.now();
+      for (let i = 0; i < newPhotos.length; i++) {
+        photoURLs.push(
+          await uploadTrailPhoto(targetId, `photo-${stamp}-${i + 1}.jpg`, newPhotos[i].blob)
+        );
+      }
+
+      // sourceRideId/sourceUserId are intentionally omitted (the iOS
+      // contract lists them as optional/omit; writing null risks a Swift
+      // decode error). source/importedFrom/originalFileName identify origin.
+      await setDoc(trailRef, {
+        name,
+        region,
+        description: document.getElementById("description").value.trim(),
+        difficulty: document.getElementById("difficulty").value,
+        rideType: rideTypeSel.value,
+        distanceMeters: routeDistanceMeters(latlngs),
+        elevationGainMeters: elevationGainMeters(
+          selected.points.map((p) => p.ele)
+        ),
+        polyline,
+        startLatitude: start[0],
+        startLongitude: start[1],
+        photoURLs,
+        isActive: document.getElementById("isActive").checked,
+        source: "imported",
+        importedFrom: importKind,
+        originalFileName,
+        verifiedBy: user.uid,
+        verifiedAt: serverTimestamp(),
+      });
+
+      queueToast("Imported trail published.", "success");
+      location.assign("/admin/trails.html");
+    } catch (err) {
+      console.error(err);
+      errEl.textContent =
+        "Publish failed: " + (err && err.message ? err.message : err);
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Publish Imported Trail";
+    }
+  });
+</script>
+
+</body>
+</html>
