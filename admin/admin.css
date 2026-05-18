@@ -349,6 +349,44 @@ body.bt-noscroll #route-tools {
 }
 .bt-trim-tip::before { display: none; }
 
+/* ---- Batch import ---- */
+.bt-batch-defaults {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-top: 1.5rem;
+  background: var(--bg2);
+}
+.bt-brow {
+  display: grid;
+  grid-template-columns: 28px 1.6fr 1fr 0.9fr 1fr 0.7fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+.bt-brow:last-child { border-bottom: none; }
+.bt-brow--head {
+  background: var(--bg3);
+  font-size: 0.72rem;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bt-brow input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--orange); }
+.bt-brow .bt-input,
+.bt-brow .bt-select {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+}
+.bt-brow-meta { font-size: 0.72rem; color: var(--muted); }
+.bt-brow--off { opacity: 0.45; }
+@media (max-width: 900px) {
+  .bt-brow { grid-template-columns: 24px 1fr 1fr; }
+  .bt-brow-meta, .bt-brow--head { display: none; }
+}
+
 /* ---- Import dropzone ---- */
 .bt-drop {
   border: 2px dashed var(--border-strong);
