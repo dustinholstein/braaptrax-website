@@ -246,6 +246,82 @@ export function elevationGainMeters(eles, windowSize = 3) {
   return gain;
 }
 
+// Resample a [[lat,lng],...] path to ~uniform spacing (linear interpolation
+// between vertices), so DEM elevation sampling is consistent and bounded.
+// Always keeps the first and last point. Caps the count (raises the step if
+// the path is long) to bound how many elevation lookups we make.
+export function resampleByDistanceMeters(latlngs, stepMeters = 60, maxPoints = 384) {
+  if (!latlngs || latlngs.length < 2) return (latlngs || []).slice();
+  const seg = [];
+  let total = 0;
+  for (let i = 1; i < latlngs.length; i++) {
+    const d = haversineMeters(latlngs[i - 1], latlngs[i]);
+    seg.push(d);
+    total += d;
+  }
+  let step = stepMeters;
+  if (total / step > maxPoints) step = total / maxPoints;
+  const out = [latlngs[0]];
+  let acc = 0;
+  let nextAt = step;
+  for (let i = 1; i < latlngs.length; i++) {
+    const a = latlngs[i - 1];
+    const b = latlngs[i];
+    const d = seg[i - 1];
+    while (d > 0 && acc + d >= nextAt) {
+      const t = (nextAt - acc) / d;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      nextAt += step;
+    }
+    acc += d;
+  }
+  const last = latlngs[latlngs.length - 1];
+  const lp = out[out.length - 1];
+  if (lp[0] !== last[0] || lp[1] !== last[1]) out.push(last);
+  return out;
+}
+
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Look up ground elevation (meters) for [[lat,lng],...] via the free,
+// key-less, CORS-enabled Open-Meteo Elevation API (Copernicus DEM, ~90 m).
+// Batched at 100 coords/request as the API requires.
+export async function fetchElevationsMeters(points, opts = {}) {
+  const chunk = opts.chunk || 100;
+  const out = [];
+  for (let i = 0; i < points.length; i += chunk) {
+    const part = points.slice(i, i + chunk);
+    const lat = part.map((p) => p[0].toFixed(6)).join(",");
+    const lng = part.map((p) => p[1].toFixed(6)).join(",");
+    const res = await fetch(
+      `https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`,
+      { signal: opts.signal }
+    );
+    if (!res.ok) throw new Error(`Elevation service HTTP ${res.status}`);
+    const j = await res.json();
+    if (!j || !Array.isArray(j.elevation)) {
+      throw new Error("Elevation service returned no data");
+    }
+    j.elevation.forEach((e) => out.push(e));
+    if (i + chunk < points.length) await _sleep(150);
+  }
+  return out;
+}
+
+// Estimate total climb (meters) for a 2D path by sampling the terrain DEM.
+// It's an estimate from ~90 m data — not barometric truth, but consistent
+// and good enough for trail metadata when the file has no elevation.
+export async function estimateElevationGainMeters(latlngs, opts = {}) {
+  const sampled = resampleByDistanceMeters(
+    latlngs,
+    opts.stepMeters || 60,
+    opts.maxPoints || 384
+  );
+  if (sampled.length < 2) return 0;
+  const eles = await fetchElevationsMeters(sampled, opts);
+  return elevationGainMeters(eles, opts.windowSize || 3);
+}
+
 // ---- Client-side image compression ---------------------------------------
 // Resize so the longest side is <= maxDim, re-encode as JPEG at `quality`.
 // Resolves with a Blob. The caller is responsible for the >5MB rejection so
