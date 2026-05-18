@@ -182,6 +182,15 @@
   import { parseTrackFile } from "/admin/admin-import.js";
 
   const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+  // Trim our own segment/part suffix and the noise "(route)"/"(track)"
+  // labels some exporters (e.g. onX) put on names.
+  const cleanName = (s) =>
+    String(s || "")
+      .replace(/ ·.*$/, "")
+      .replace(/\s*\((?:route|track)\)\s*$/i, "")
+      .trim()
+      .slice(0, 120);
   const { user } = await guardPage("import");
 
   document.getElementById("boot").remove();
@@ -341,7 +350,7 @@
     }
     statsEl.textContent = `${escapeHtml(track.name)} — ${track.points.length} points · ${metersToMiles(meters).toFixed(2)} mi${hasEle ? ` · ${Math.round(metersToFeet(gain)).toLocaleString()} ft gain` : " · no elevation in file"}`;
     if (!document.getElementById("name").value) {
-      document.getElementById("name").value = track.name.replace(/ ·.*$/, "");
+      document.getElementById("name").value = cleanName(track.name);
     }
 
     ensureMap();
@@ -563,7 +572,7 @@
         meters: routeDistanceMeters(latlngs),
         hasEle,
         include: true,
-        name: c.name.replace(/ ·.*$/, "").slice(0, 120),
+        name: cleanName(c.name),
         region: "",
         difficulty: document.getElementById("d-difficulty").value,
         rideType: RIDE_TYPES[0],

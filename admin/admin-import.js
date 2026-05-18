@@ -78,7 +78,7 @@ export function parseGpx(text) {
       .filter((p) => p.lat != null && p.lng != null);
     if (points.length >= 2) {
       tracks.push({
-        name: (textOf(rte, "name") || `Route ${ri + 1}`) + " (route)",
+        name: textOf(rte, "name") || `Route ${ri + 1}`,
         points,
       });
     }
