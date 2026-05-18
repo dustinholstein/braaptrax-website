@@ -21,6 +21,22 @@
     </div>
     <a class="bt-btn bt-btn-primary" href="/admin/manual.html">+ New Manual Trail</a>
   </div>
+
+  <div class="bt-filters">
+    <input id="f-q" class="bt-input" type="search" placeholder="Search name or region (use * wildcard)">
+    <select id="f-diff" class="bt-select">
+      <option value="">Any difficulty</option>
+      <option value="beginner">Beginner</option>
+      <option value="intermediate">Intermediate</option>
+      <option value="advanced">Advanced</option>
+      <option value="expert">Expert</option>
+    </select>
+    <input id="f-emin" class="bt-input" type="number" min="0" step="100" placeholder="Min ft">
+    <input id="f-emax" class="bt-input" type="number" min="0" step="100" placeholder="Max ft">
+    <button id="f-clear" class="bt-btn bt-btn-ghost bt-btn-sm" type="button">Clear</button>
+    <span class="bt-hint" id="f-count"></span>
+  </div>
+
   <div id="trails"></div>
   <div class="bt-center" id="more-wrap" hidden>
     <button class="bt-btn bt-btn-ghost" id="more-btn">Load more</button>
@@ -39,6 +55,7 @@
     doc, updateDoc, deleteDoc,
     storageRef, listAll, deleteObject,
     rideTypeIcon, escapeHtml, showToast,
+    metersToMiles, metersToFeet,
   } from "/admin/admin.js";
 
   const PAGE_SIZE = 50;
@@ -62,10 +79,16 @@
     imported: "Imported",
   };
 
+  function trailFeet(t) {
+    return Math.round(metersToFeet(Number(t.elevationGainMeters) || 0));
+  }
+
   function trailRow(id, t) {
     const diff = (t.difficulty || "").toLowerCase();
     const active = t.isActive !== false;
     const srcLabel = SOURCE_LABEL[t.source] || (t.source ? escapeHtml(t.source) : "Manual");
+    const mi = metersToMiles(Number(t.distanceMeters) || 0).toFixed(1);
+    const ft = trailFeet(t);
     return `
       <div class="bt-row" data-id="${id}">
         <div class="bt-row-icon">${rideTypeIcon(t.rideType)}</div>
@@ -74,6 +97,8 @@
           <div class="bt-row-meta">
             <span>${escapeHtml(t.region || "—")}</span>
             ${diff ? `<span class="bt-badge bt-badge--${diff}">${escapeHtml(diff)}</span>` : ""}
+            <span>${mi} mi</span>
+            <span>${ft.toLocaleString()} ft</span>
             <span class="bt-badge bt-badge--source">${srcLabel}</span>
             <span class="bt-badge bt-badge--${active ? "active" : "inactive"}">${active ? "Active" : "Inactive"}</span>
           </div>
@@ -86,8 +111,54 @@
       </div>`;
   }
 
+  // ---- Filters ----
+  const fQ = document.getElementById("f-q");
+  const fDiff = document.getElementById("f-diff");
+  const fEmin = document.getElementById("f-emin");
+  const fEmax = document.getElementById("f-emax");
+  const fCount = document.getElementById("f-count");
+
+  function filtersActive() {
+    return !!(
+      fQ.value.trim() ||
+      fDiff.value ||
+      fEmin.value !== "" ||
+      fEmax.value !== ""
+    );
+  }
+
+  function buildMatcher(q) {
+    const s = q.trim();
+    if (!s) return null;
+    // escape regex, treat * as wildcard, substring (case-insensitive)
+    const rx = s
+      .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*/g, ".*");
+    try {
+      return new RegExp(rx, "i");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function matches(t) {
+    const m = buildMatcher(fQ.value);
+    if (m && !(m.test(t.name || "") || m.test(t.region || ""))) return false;
+    if (fDiff.value && (t.difficulty || "").toLowerCase() !== fDiff.value) {
+      return false;
+    }
+    const ft = trailFeet(t);
+    if (fEmin.value !== "" && ft < Number(fEmin.value)) return false;
+    if (fEmax.value !== "" && ft > Number(fEmax.value)) return false;
+    return true;
+  }
+
   function render() {
-    const rows = [...loaded.entries()].sort((a, b) => {
+    let entries = [...loaded.entries()];
+    const total = entries.length;
+    const active = filtersActive();
+    if (active) entries = entries.filter(([, t]) => matches(t));
+    entries.sort((a, b) => {
       const ra = (a[1].region || "").toLowerCase();
       const rb = (b[1].region || "").toLowerCase();
       if (ra !== rb) return ra < rb ? -1 : 1;
@@ -95,36 +166,88 @@
       const nb = (b[1].name || "").toLowerCase();
       return na < nb ? -1 : na > nb ? 1 : 0;
     });
-    if (rows.length === 0) {
-      trailsEl.innerHTML = `<div class="bt-empty">No verified trails yet. Publish one from My Rides.</div>`;
+    fCount.textContent = active
+      ? `${entries.length} of ${total} match`
+      : total
+      ? `${total} loaded${exhausted ? "" : "+"}`
+      : "";
+    moreWrap.hidden = active || exhausted;
+    if (entries.length === 0) {
+      trailsEl.innerHTML = `<div class="bt-empty">${
+        total === 0
+          ? "No verified trails yet. Publish one from My Rides."
+          : "No trails match these filters."
+      }</div>`;
       return;
     }
     trailsEl.innerHTML =
       `<div class="bt-list">` +
-      rows.map(([id, t]) => trailRow(id, t)).join("") +
+      entries.map(([id, t]) => trailRow(id, t)).join("") +
       `</div>`;
   }
 
-  async function load() {
-    if (exhausted) return;
+  async function loadPage() {
+    if (exhausted) return 0;
     let q = query(
       collection(db, "verifiedTrails"),
       orderBy("region"),
       limit(PAGE_SIZE)
     );
     if (lastDoc) q = query(q, startAfter(lastDoc));
+    const snap = await getDocs(q);
+    snap.forEach((d) => loaded.set(d.id, d.data()));
+    lastDoc = snap.docs[snap.docs.length - 1] || lastDoc;
+    if (snap.size < PAGE_SIZE) exhausted = true;
+    return snap.size;
+  }
+
+  async function loadAll() {
+    while (!exhausted) {
+      // eslint-disable-next-line no-await-in-loop
+      await loadPage();
+    }
+  }
+
+  async function load() {
     try {
-      const snap = await getDocs(q);
-      snap.forEach((d) => loaded.set(d.id, d.data()));
-      lastDoc = snap.docs[snap.docs.length - 1] || lastDoc;
-      if (snap.size < PAGE_SIZE) exhausted = true;
-      moreWrap.hidden = exhausted;
+      await loadPage();
       render();
     } catch (e) {
       console.error(e);
       trailsEl.innerHTML = `<div class="bt-empty">Couldn't load trails. ${escapeHtml(e.message || e)}</div>`;
     }
   }
+
+  // Filtering needs the full set (Firestore has no substring search), so
+  // load every page once when a filter is first applied.
+  let filterTimer = null;
+  async function onFilter() {
+    if (filtersActive() && !exhausted) {
+      fCount.textContent = "Loading all trails to search…";
+      try {
+        await loadAll();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    render();
+  }
+  ["input", "change"].forEach((ev) => {
+    fQ.addEventListener(ev, () => {
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(onFilter, 200);
+    });
+    fDiff.addEventListener(ev, onFilter);
+    fEmin.addEventListener(ev, onFilter);
+    fEmax.addEventListener(ev, onFilter);
+  });
+  document.getElementById("f-clear").addEventListener("click", () => {
+    fQ.value = "";
+    fDiff.value = "";
+    fEmin.value = "";
+    fEmax.value = "";
+    render();
+  });
 
   async function deleteTrailPhotos(id) {
     try {

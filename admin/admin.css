@@ -349,6 +349,19 @@ body.bt-noscroll #route-tools {
 }
 .bt-trim-tip::before { display: none; }
 
+/* ---- Trails filter bar ---- */
+.bt-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 1.5rem;
+}
+.bt-filters #f-q { flex: 1 1 280px; min-width: 200px; }
+.bt-filters .bt-select { flex: 0 0 auto; width: auto; }
+.bt-filters input[type="number"] { width: 110px; }
+.bt-filters #f-count { margin-left: auto; }
+
 /* ---- Batch import ---- */
 .bt-batch-defaults {
   border: 1px solid var(--border-strong);
