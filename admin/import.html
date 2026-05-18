@@ -50,6 +50,8 @@
       <div class="bt-field">
         <label class="bt-label" for="region">Region <span class="req">*</span></label>
         <input class="bt-input" type="text" id="region" placeholder="Moab, UT" maxlength="120" required>
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="region-auto" style="margin-top:.5rem;align-self:flex-start">Detect region</button>
+        <span class="bt-hint" id="region-hint"></span>
       </div>
     </div>
 
@@ -148,8 +150,10 @@
       </div>
       <div class="bt-row-actions" style="margin-top:.75rem">
         <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="apply-all">Apply defaults to all rows</button>
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="region-all">Re-detect region for all</button>
         <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="elev-all">Recalculate elevation for all (terrain)</button>
       </div>
+      <span class="bt-hint" id="region-all-progress"></span>
       <span class="bt-hint" id="elev-all-progress"></span>
     </div>
 
@@ -176,7 +180,7 @@
     doc, collection, setDoc, writeBatch, serverTimestamp,
     uploadTrailPhoto, compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, encodePolyline, routeDistanceMeters, elevationGainMeters,
-    estimateElevationGainMeters,
+    estimateElevationGainMeters, reverseRegion, pathMidpoint,
     metersToMiles, metersToFeet, feetToMeters, queueToast, escapeHtml,
   } from "/admin/admin.js";
   import { parseTrackFile } from "/admin/admin-import.js";
@@ -353,6 +357,13 @@
       document.getElementById("name").value = cleanName(track.name);
     }
 
+    regionManual = false;
+    if (!document.getElementById("region").value.trim()) {
+      document.getElementById("region-hint").textContent =
+        "Detecting region from the route…";
+      runSingleRegion(false);
+    }
+
     ensureMap();
     if (map) {
       if (line) line.remove();
@@ -406,6 +417,49 @@
   }
   document.getElementById("elev-auto").addEventListener("click", () =>
     runSingleElevation(true)
+  );
+
+  // Reverse-geocoded region for the single form. Auto-runs when Region is
+  // empty; the button forces a re-detect. Typing in Region wins.
+  let regionManual = false;
+  let regionToken = 0;
+  document.getElementById("region").addEventListener("input", () => {
+    regionManual = true;
+  });
+  async function runSingleRegion(force) {
+    if (!selected) return;
+    if (regionManual && !force) return;
+    const sel = selected;
+    const myToken = ++regionToken;
+    const btn = document.getElementById("region-auto");
+    const hint = document.getElementById("region-hint");
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Detecting…";
+    try {
+      const mid = pathMidpoint(sel.points.map((p) => [p.lat, p.lng]));
+      const region = mid ? await reverseRegion(mid[0], mid[1]) : "";
+      if (sel !== selected || myToken !== regionToken) return; // stale
+      if (regionManual && !force) return;
+      if (region) {
+        document.getElementById("region").value = region;
+        hint.textContent = "Detected from the route — edit to override.";
+      } else {
+        hint.textContent = "Couldn't detect a region — enter it manually.";
+      }
+    } catch (err) {
+      console.error(err);
+      hint.textContent =
+        "Region lookup failed (" +
+        (err.message || err) +
+        "). Enter it manually or click Detect.";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+  document.getElementById("region-auto").addEventListener("click", () =>
+    runSingleRegion(true)
   );
 
   // ---- Photos (same pattern as publish.html) ----
@@ -580,6 +634,7 @@
           ? Math.round(metersToFeet(elevationGainMeters(c.points.map((p) => p.ele))))
           : 0,
         elevTouched: false,
+        regionTouched: false,
       };
     });
 
@@ -626,7 +681,9 @@
         if (b) previewRow(Number(b.closest(".bt-brow").dataset.i));
       });
     }
-    // Auto-fill elevation from terrain for rows the file couldn't provide.
+    // Auto-fill region (reverse geocode) and elevation (terrain) for rows
+    // that need them; admin edits are respected.
+    autoRegionBatch(false);
     autoElevateBatch(false);
   }
 
@@ -644,6 +701,7 @@
       rows[i].elevTouched = true; // manual override — auto won't clobber it
     } else {
       rows[i][k] = ctrl.value;
+      if (k === "region") rows[i].regionTouched = true;
     }
   }
 
@@ -662,10 +720,16 @@
     const rideType = document.getElementById("d-ridetype").value;
     const dElev = Math.max(0, parseFloat(document.getElementById("d-elev").value) || 0);
     rows.forEach((r) => {
-      if (region) r.region = region;
+      if (region) {
+        r.region = region;
+        r.regionTouched = true; // explicit override — auto-geocode won't run
+      }
       r.difficulty = difficulty;
       r.rideType = rideType;
-      if (!r.hasEle && dElev) r.elevFt = dElev;
+      if (!r.hasEle && dElev) {
+        r.elevFt = dElev;
+        r.elevTouched = true;
+      }
     });
     // re-sync the visible controls
     document.querySelectorAll("#batch-list .bt-brow[data-i]").forEach((el) => {
@@ -726,6 +790,59 @@
   }
   document.getElementById("elev-all").addEventListener("click", () =>
     autoElevateBatch(true)
+  );
+
+  // Reverse-geocode region per row. force=false: only rows with no region
+  // and no manual edit. force=true: re-detect every included row.
+  let regionBatchRun = 0;
+  async function autoRegionBatch(force) {
+    const runId = ++regionBatchRun;
+    const btn = document.getElementById("region-all");
+    const prog = document.getElementById("region-all-progress");
+    const targets = rows.filter(
+      (r) => r.include && (force || (!r.region && !r.regionTouched))
+    );
+    if (!targets.length) {
+      if (force) prog.textContent = "Nothing to detect.";
+      return;
+    }
+    btn.disabled = true;
+    let done = 0;
+    let failed = 0;
+    for (const r of targets) {
+      if (runId !== regionBatchRun) return; // superseded by a new import
+      if (!force && r.regionTouched) { done++; continue; }
+      try {
+        const mid = pathMidpoint(r.latlngs);
+        const region = mid ? await reverseRegion(mid[0], mid[1]) : "";
+        if (runId !== regionBatchRun) return;
+        if (!force && r.regionTouched) { done++; continue; }
+        if (region) {
+          r.region = region;
+          const el = document.querySelector(
+            `#batch-list .bt-brow[data-i="${rows.indexOf(r)}"] [data-k="region"]`
+          );
+          if (el) el.value = region;
+        } else {
+          failed++;
+        }
+      } catch (err) {
+        console.error(err);
+        failed++;
+      }
+      done++;
+      prog.textContent =
+        `Detecting region ${done}/${targets.length}` +
+        (failed ? ` · ${failed} not found` : "");
+    }
+    if (runId !== regionBatchRun) return;
+    btn.disabled = false;
+    prog.textContent =
+      `Region: ${done - failed}/${targets.length} detected` +
+      (failed ? `, ${failed} need manual entry` : "") + ".";
+  }
+  document.getElementById("region-all").addEventListener("click", () =>
+    autoRegionBatch(true)
   );
 
   document.getElementById("batch-publish").addEventListener("click", async () => {
