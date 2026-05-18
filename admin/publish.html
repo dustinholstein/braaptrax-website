@@ -151,6 +151,7 @@
     metersToMiles, metersToFeet, feetToMeters,
     compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, queueToast, escapeHtml,
+    buildTrailIndex, TRAIL_INDEX_COLLECTION,
   } from "/admin/admin.js";
 
   const params = new URLSearchParams(location.search);
@@ -920,6 +921,22 @@
           verifiedBy: user.uid,
           verifiedAt: serverTimestamp(),
         });
+      }
+
+      // Mirror into the lightweight search index (best-effort: if the
+      // trailIndex rules aren't deployed yet this is skipped, and the
+      // Trails "Rebuild index" tool backfills it later).
+      try {
+        const idxSource = isEdit
+          ? data.source || "manual"
+          : isRide
+          ? "user_ride"
+          : "manual";
+        await setDoc(doc(db, TRAIL_INDEX_COLLECTION, targetId), {
+          ...buildTrailIndex({ ...editable, source: idxSource }),
+        });
+      } catch (idxErr) {
+        console.warn("[publish] trailIndex write skipped:", idxErr.message || idxErr);
       }
 
       queueToast(

@@ -182,6 +182,7 @@
     RIDE_TYPES, encodePolyline, routeDistanceMeters, elevationGainMeters,
     estimateElevationGainMeters, reverseRegion, pathMidpoint,
     metersToMiles, metersToFeet, feetToMeters, queueToast, escapeHtml,
+    buildTrailIndex, TRAIL_INDEX_COLLECTION,
   } from "/admin/admin.js";
   import { parseTrackFile } from "/admin/admin-import.js";
 
@@ -550,7 +551,7 @@
       // sourceRideId/sourceUserId are intentionally omitted (the iOS
       // contract lists them as optional/omit; writing null risks a Swift
       // decode error). source/importedFrom/originalFileName identify origin.
-      await setDoc(trailRef, {
+      const trailDoc = {
         name,
         region,
         description: document.getElementById("description").value.trim(),
@@ -573,7 +574,16 @@
         originalFileName,
         verifiedBy: user.uid,
         verifiedAt: serverTimestamp(),
-      });
+      };
+      await setDoc(trailRef, trailDoc);
+      try {
+        await setDoc(
+          doc(db, TRAIL_INDEX_COLLECTION, targetId),
+          buildTrailIndex(trailDoc)
+        );
+      } catch (idxErr) {
+        console.warn("[import] trailIndex write skipped:", idxErr.message || idxErr);
+      }
 
       queueToast("Imported trail published.", "success");
       location.assign("/admin/trails.html");
@@ -866,14 +876,16 @@
     btn.disabled = true;
     let done = 0;
     try {
-      // Firestore writeBatch caps at 500 ops; chunk well under that.
-      const CHUNK = 400;
+      // writeBatch caps at 500 ops; we write a trail + its index entry
+      // per row in separate batches, so chunk at 200.
+      const CHUNK = 200;
       for (let i = 0; i < sel.length; i += CHUNK) {
         const slice = sel.slice(i, i + CHUNK);
         const batch = writeBatch(db);
+        const idxBatch = writeBatch(db);
         for (const r of slice) {
           const ref = doc(collection(db, "verifiedTrails"));
-          batch.set(ref, {
+          const trailDoc = {
             name: r.name.trim(),
             region: r.region.trim(),
             description: desc,
@@ -891,9 +903,20 @@
             originalFileName: r.fileName,
             verifiedBy: user.uid,
             verifiedAt: serverTimestamp(),
-          });
+          };
+          batch.set(ref, trailDoc);
+          idxBatch.set(
+            doc(db, TRAIL_INDEX_COLLECTION, ref.id),
+            buildTrailIndex(trailDoc)
+          );
         }
         await batch.commit();
+        // Index is best-effort: never block/raise the publish on it.
+        try {
+          await idxBatch.commit();
+        } catch (idxErr) {
+          console.warn("[import] trailIndex batch skipped:", idxErr.message || idxErr);
+        }
         done += slice.length;
         prog.textContent = `Published ${done}/${sel.length}…`;
       }

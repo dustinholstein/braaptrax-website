@@ -12,6 +12,7 @@ import {
   getFirestore,
   doc,
   getDoc,
+  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   getStorage,
@@ -357,6 +358,24 @@ export async function reverseRegion(lat, lng, opts = {}) {
 export function pathMidpoint(latlngs) {
   if (!latlngs || !latlngs.length) return null;
   return latlngs[Math.floor(latlngs.length / 2)];
+}
+
+// Lightweight search-index projection of a trail. Stored in the separate
+// `trailIndex` collection (same doc id) so the Trails page can list/search
+// without ever downloading polylines. NEVER include the polyline here.
+export const TRAIL_INDEX_COLLECTION = "trailIndex";
+export function buildTrailIndex(t) {
+  return {
+    name: t.name || "",
+    region: t.region || "",
+    difficulty: t.difficulty || "",
+    rideType: t.rideType || "",
+    source: t.source || "",
+    isActive: t.isActive !== false,
+    distanceMeters: Number(t.distanceMeters) || 0,
+    elevationGainMeters: Number(t.elevationGainMeters) || 0,
+    updatedAt: serverTimestamp(),
+  };
 }
 
 // ---- Client-side image compression ---------------------------------------

@@ -19,8 +19,13 @@
       <h1 class="bt-title">Verified Trails</h1>
       <p class="bt-sub">Manage every published verified trail. Sorted by region, then name.</p>
     </div>
-    <a class="bt-btn bt-btn-primary" href="/admin/manual.html">+ New Manual Trail</a>
+    <div class="bt-row-actions">
+      <button class="bt-btn bt-btn-ghost bt-btn-sm" id="rebuild-btn" type="button">Rebuild search index</button>
+      <a class="bt-btn bt-btn-primary" href="/admin/manual.html">+ New Manual Trail</a>
+    </div>
   </div>
+
+  <div class="bt-callout" id="index-banner" hidden style="margin-bottom:1.25rem"></div>
 
   <div class="bt-filters">
     <input id="f-q" class="bt-input" type="search" placeholder="Search name or region (use * wildcard)">
@@ -52,13 +57,17 @@
     guardPage,
     db, storage,
     collection, query, orderBy, limit, startAfter, getDocs,
-    doc, updateDoc, deleteDoc,
+    doc, updateDoc, deleteDoc, setDoc, writeBatch,
     storageRef, listAll, deleteObject,
     rideTypeIcon, escapeHtml, showToast,
     metersToMiles, metersToFeet,
+    buildTrailIndex, TRAIL_INDEX_COLLECTION,
   } from "/admin/admin.js";
 
   const PAGE_SIZE = 50;
+  // Read the lightweight index by default; fall back to scanning
+  // verifiedTrails if the index isn't built/permitted yet.
+  let SRC = TRAIL_INDEX_COLLECTION;
   await guardPage("trails");
 
   document.getElementById("boot").remove();
@@ -189,7 +198,7 @@
   async function loadPage() {
     if (exhausted) return 0;
     let q = query(
-      collection(db, "verifiedTrails"),
+      collection(db, SRC),
       orderBy("region"),
       limit(PAGE_SIZE)
     );
@@ -272,6 +281,11 @@
       btn.disabled = true;
       try {
         await updateDoc(doc(db, "verifiedTrails", id), { isActive: next });
+        try {
+          await updateDoc(doc(db, TRAIL_INDEX_COLLECTION, id), { isActive: next });
+        } catch (ie) {
+          console.warn("[trails] index isActive sync skipped:", ie.message || ie);
+        }
         t.isActive = next;
         render();
         showToast(next ? "Trail reactivated." : "Trail deactivated.");
@@ -290,6 +304,11 @@
       btn.disabled = true;
       try {
         await deleteDoc(doc(db, "verifiedTrails", id));
+        try {
+          await deleteDoc(doc(db, TRAIL_INDEX_COLLECTION, id));
+        } catch (ie) {
+          console.warn("[trails] index delete skipped:", ie.message || ie);
+        }
         await deleteTrailPhotos(id);
         loaded.delete(id);
         render();
@@ -310,6 +329,94 @@
     moreBtn.textContent = "Load more";
   });
 
+  // ---- Index detection / rebuild ----
+  const banner = document.getElementById("index-banner");
+  const rebuildBtn = document.getElementById("rebuild-btn");
+
+  async function probe(coll) {
+    try {
+      const s = await getDocs(query(collection(db, coll), limit(1)));
+      return s.size; // 0 = empty
+    } catch (_) {
+      return -1; // unreadable (rules not deployed)
+    }
+  }
+
+  async function detectSource() {
+    const idx = await probe(TRAIL_INDEX_COLLECTION);
+    if (idx > 0) {
+      SRC = TRAIL_INDEX_COLLECTION;
+      banner.hidden = true;
+      return;
+    }
+    SRC = "verifiedTrails"; // safe fallback so the page always works
+    const vt = await probe("verifiedTrails");
+    if (vt === 0) {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    banner.innerHTML =
+      (idx === -1
+        ? "Fast search index isn't readable yet — deploy the <code>trailIndex</code> Firestore rules. "
+        : "Fast search index is empty. ") +
+      "Browsing the full collection for now; click <strong>Rebuild search index</strong> after the rules are deployed.";
+  }
+
+  async function rebuildIndex() {
+    rebuildBtn.disabled = true;
+    const old = rebuildBtn.textContent;
+    rebuildBtn.textContent = "Rebuilding…";
+    try {
+      let cursor = null;
+      let total = 0;
+      let ex = false;
+      while (!ex) {
+        let q = query(
+          collection(db, "verifiedTrails"),
+          orderBy("region"),
+          limit(200)
+        );
+        if (cursor) q = query(q, startAfter(cursor));
+        const snap = await getDocs(q);
+        if (snap.size) {
+          const batch = writeBatch(db);
+          snap.forEach((d) =>
+            batch.set(
+              doc(db, TRAIL_INDEX_COLLECTION, d.id),
+              buildTrailIndex(d.data())
+            )
+          );
+          await batch.commit();
+        }
+        cursor = snap.docs[snap.docs.length - 1] || cursor;
+        total += snap.size;
+        if (snap.size < 200) ex = true;
+        rebuildBtn.textContent = `Rebuilding… ${total}`;
+      }
+      showToast(`Search index rebuilt (${total} trails).`);
+      SRC = TRAIL_INDEX_COLLECTION;
+      banner.hidden = true;
+      loaded.clear();
+      lastDoc = null;
+      exhausted = false;
+      await load();
+    } catch (e) {
+      console.error(e);
+      showToast(
+        "Rebuild failed (" +
+          (e && e.message ? e.message : e) +
+          "). Check the trailIndex rules.",
+        "error"
+      );
+    } finally {
+      rebuildBtn.disabled = false;
+      rebuildBtn.textContent = old;
+    }
+  }
+  rebuildBtn.addEventListener("click", rebuildIndex);
+
+  await detectSource();
   await load();
 </script>
 
