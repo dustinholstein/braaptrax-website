@@ -82,7 +82,7 @@
       <div class="bt-field">
         <label class="bt-label" for="elevation">Elevation Gain (feet)</label>
         <input class="bt-input" type="number" id="elevation" min="0" step="1" value="0" placeholder="0">
-        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="elev-auto" style="margin-top:.5rem;align-self:flex-start">Auto-calc from terrain</button>
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="elev-auto" style="margin-top:.5rem;align-self:flex-start">Recalculate from terrain</button>
         <span class="bt-hint" id="elev-hint"></span>
       </div>
     </div>
@@ -148,7 +148,7 @@
       </div>
       <div class="bt-row-actions" style="margin-top:.75rem">
         <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="apply-all">Apply defaults to all rows</button>
-        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="elev-all">Auto-calc elevation for all (terrain)</button>
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="elev-all">Recalculate elevation for all (terrain)</button>
       </div>
       <span class="bt-hint" id="elev-all-progress"></span>
     </div>
@@ -328,10 +328,17 @@
     );
     const gain = elevationGainMeters(track.points.map((p) => p.ele));
     document.getElementById("distance").value = metersToMiles(meters).toFixed(2);
-    document.getElementById("elevation").value = String(Math.round(metersToFeet(gain)));
-    document.getElementById("elev-hint").textContent = hasEle
-      ? "Computed from the file's elevation data — edit if you know better."
-      : "This file has no elevation data (2D geometry) — enter feet manually if known.";
+    elevManual = false;
+    if (hasEle) {
+      document.getElementById("elevation").value = String(Math.round(metersToFeet(gain)));
+      document.getElementById("elev-hint").textContent =
+        "Computed from the file's elevation data — edit to override.";
+    } else {
+      document.getElementById("elevation").value = "0";
+      document.getElementById("elev-hint").textContent =
+        "No elevation in file — estimating from terrain…";
+      runSingleElevation(false);
+    }
     statsEl.textContent = `${escapeHtml(track.name)} — ${track.points.length} points · ${metersToMiles(meters).toFixed(2)} mi${hasEle ? ` · ${Math.round(metersToFeet(gain)).toLocaleString()} ft gain` : " · no elevation in file"}`;
     if (!document.getElementById("name").value) {
       document.getElementById("name").value = track.name.replace(/ ·.*$/, "");
@@ -348,33 +355,49 @@
     }
   }
 
-  // Estimate elevation from the terrain DEM for the single-track form.
-  document.getElementById("elev-auto").addEventListener("click", async () => {
+  // Terrain-DEM elevation for the single form. Auto-runs when the file has
+  // no elevation; the button forces a recalc. A manual edit to the field
+  // wins and won't be overwritten by a late auto result.
+  let elevManual = false;
+  let elevToken = 0;
+  document.getElementById("elevation").addEventListener("input", () => {
+    elevManual = true;
+  });
+  async function runSingleElevation(force) {
     if (!selected) return;
+    if (elevManual && !force) return;
+    const sel = selected;
+    const myToken = ++elevToken;
     const btn = document.getElementById("elev-auto");
     const hint = document.getElementById("elev-hint");
+    const label = btn.textContent;
     btn.disabled = true;
     btn.textContent = "Calculating…";
     try {
       const gain = await estimateElevationGainMeters(
-        selected.points.map((p) => [p.lat, p.lng])
+        sel.points.map((p) => [p.lat, p.lng])
       );
+      if (sel !== selected || myToken !== elevToken) return; // stale
+      if (elevManual && !force) return;
       document.getElementById("elevation").value = String(
         Math.round(metersToFeet(gain))
       );
       hint.textContent =
-        "Estimated from terrain (Open-Meteo DEM, ~90 m) — adjust if you know better.";
+        "Estimated from terrain (Open-Meteo DEM, ~90 m) — edit to override.";
     } catch (err) {
       console.error(err);
       hint.textContent =
         "Terrain lookup failed (" +
         (err.message || err) +
-        "). Enter feet manually or retry.";
+        "). Enter feet manually or click Recalculate.";
     } finally {
       btn.disabled = false;
-      btn.textContent = "Auto-calc from terrain";
+      btn.textContent = label;
     }
-  });
+  }
+  document.getElementById("elev-auto").addEventListener("click", () =>
+    runSingleElevation(true)
+  );
 
   // ---- Photos (same pattern as publish.html) ----
   const grid = document.getElementById("photo-grid");
@@ -547,6 +570,7 @@
         elevFt: hasEle
           ? Math.round(metersToFeet(elevationGainMeters(c.points.map((p) => p.ele))))
           : 0,
+        elevTouched: false,
       };
     });
 
@@ -593,6 +617,8 @@
         if (b) previewRow(Number(b.closest(".bt-brow").dataset.i));
       });
     }
+    // Auto-fill elevation from terrain for rows the file couldn't provide.
+    autoElevateBatch(false);
   }
 
   function onRowInput(e) {
@@ -606,6 +632,7 @@
       rowEl.classList.toggle("bt-brow--off", !ctrl.checked);
     } else if (k === "elevFt") {
       rows[i].elevFt = Math.max(0, parseFloat(ctrl.value) || 0);
+      rows[i].elevTouched = true; // manual override — auto won't clobber it
     } else {
       rows[i][k] = ctrl.value;
     }
@@ -641,22 +668,33 @@
     });
   });
 
-  document.getElementById("elev-all").addEventListener("click", async () => {
+  // force=false: auto pass — only rows the file lacked elevation for and
+  // the admin hasn't manually edited. force=true: button — recalc every
+  // included row (override). A new import cancels an in-flight pass.
+  let elevBatchRun = 0;
+  async function autoElevateBatch(force) {
+    const runId = ++elevBatchRun;
     const btn = document.getElementById("elev-all");
     const prog = document.getElementById("elev-all-progress");
-    const targets = rows.filter((r) => r.include);
+    const targets = rows.filter(
+      (r) => r.include && (force || (!r.hasEle && !r.elevTouched))
+    );
     if (!targets.length) {
-      prog.textContent = "No rows selected.";
+      if (force) prog.textContent = "Nothing to estimate.";
       return;
     }
     btn.disabled = true;
     let done = 0;
     let failed = 0;
     for (const r of targets) {
+      if (runId !== elevBatchRun) return; // superseded by a new import
+      if (!force && r.elevTouched) { done++; continue; } // admin took over
       try {
         const gain = await estimateElevationGainMeters(r.latlngs, {
           maxPoints: 256,
         });
+        if (runId !== elevBatchRun) return;
+        if (!force && r.elevTouched) { done++; continue; }
         r.elevFt = Math.round(metersToFeet(gain));
         const el = document.querySelector(
           `#batch-list .bt-brow[data-i="${rows.indexOf(r)}"] [data-k="elevFt"]`
@@ -668,14 +706,18 @@
       }
       done++;
       prog.textContent =
-        `Elevation ${done}/${targets.length}` +
-        (failed ? ` · ${failed} failed (left as-is)` : "");
+        `Estimating elevation ${done}/${targets.length}` +
+        (failed ? ` · ${failed} failed` : "");
     }
+    if (runId !== elevBatchRun) return;
     btn.disabled = false;
     prog.textContent =
-      `Done — ${done - failed}/${targets.length} estimated from terrain` +
-      (failed ? `, ${failed} failed (enter manually)` : "") + ".";
-  });
+      `Elevation: ${done - failed}/${targets.length} from terrain` +
+      (failed ? `, ${failed} failed (edit manually)` : "") + ".";
+  }
+  document.getElementById("elev-all").addEventListener("click", () =>
+    autoElevateBatch(true)
+  );
 
   document.getElementById("batch-publish").addEventListener("click", async () => {
     const bErr = document.getElementById("batch-error");
