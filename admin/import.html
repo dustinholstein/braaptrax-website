@@ -82,6 +82,7 @@
       <div class="bt-field">
         <label class="bt-label" for="elevation">Elevation Gain (feet)</label>
         <input class="bt-input" type="number" id="elevation" min="0" step="1" value="0" placeholder="0">
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="elev-auto" style="margin-top:.5rem;align-self:flex-start">Auto-calc from terrain</button>
         <span class="bt-hint" id="elev-hint"></span>
       </div>
     </div>
@@ -145,7 +146,11 @@
         <label class="bt-label" for="d-desc">Description (applied to all)</label>
         <textarea class="bt-textarea" id="d-desc" maxlength="2000" style="min-height:90px"></textarea>
       </div>
-      <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="apply-all" style="margin-top:.75rem">Apply defaults to all rows</button>
+      <div class="bt-row-actions" style="margin-top:.75rem">
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="apply-all">Apply defaults to all rows</button>
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="elev-all">Auto-calc elevation for all (terrain)</button>
+      </div>
+      <span class="bt-hint" id="elev-all-progress"></span>
     </div>
 
     <div class="bt-list" id="batch-list" style="margin-top:1.5rem"></div>
@@ -171,6 +176,7 @@
     doc, collection, setDoc, writeBatch, serverTimestamp,
     uploadTrailPhoto, compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, encodePolyline, routeDistanceMeters, elevationGainMeters,
+    estimateElevationGainMeters,
     metersToMiles, metersToFeet, feetToMeters, queueToast, escapeHtml,
   } from "/admin/admin.js";
   import { parseTrackFile } from "/admin/admin-import.js";
@@ -341,6 +347,34 @@
       document.getElementById("map").style.display = "none";
     }
   }
+
+  // Estimate elevation from the terrain DEM for the single-track form.
+  document.getElementById("elev-auto").addEventListener("click", async () => {
+    if (!selected) return;
+    const btn = document.getElementById("elev-auto");
+    const hint = document.getElementById("elev-hint");
+    btn.disabled = true;
+    btn.textContent = "Calculating…";
+    try {
+      const gain = await estimateElevationGainMeters(
+        selected.points.map((p) => [p.lat, p.lng])
+      );
+      document.getElementById("elevation").value = String(
+        Math.round(metersToFeet(gain))
+      );
+      hint.textContent =
+        "Estimated from terrain (Open-Meteo DEM, ~90 m) — adjust if you know better.";
+    } catch (err) {
+      console.error(err);
+      hint.textContent =
+        "Terrain lookup failed (" +
+        (err.message || err) +
+        "). Enter feet manually or retry.";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Auto-calc from terrain";
+    }
+  });
 
   // ---- Photos (same pattern as publish.html) ----
   const grid = document.getElementById("photo-grid");
@@ -605,6 +639,42 @@
       el.querySelector('[data-k="rideType"]').value = rows[i].rideType;
       el.querySelector('[data-k="elevFt"]').value = rows[i].elevFt;
     });
+  });
+
+  document.getElementById("elev-all").addEventListener("click", async () => {
+    const btn = document.getElementById("elev-all");
+    const prog = document.getElementById("elev-all-progress");
+    const targets = rows.filter((r) => r.include);
+    if (!targets.length) {
+      prog.textContent = "No rows selected.";
+      return;
+    }
+    btn.disabled = true;
+    let done = 0;
+    let failed = 0;
+    for (const r of targets) {
+      try {
+        const gain = await estimateElevationGainMeters(r.latlngs, {
+          maxPoints: 256,
+        });
+        r.elevFt = Math.round(metersToFeet(gain));
+        const el = document.querySelector(
+          `#batch-list .bt-brow[data-i="${rows.indexOf(r)}"] [data-k="elevFt"]`
+        );
+        if (el) el.value = r.elevFt;
+      } catch (err) {
+        console.error(err);
+        failed++;
+      }
+      done++;
+      prog.textContent =
+        `Elevation ${done}/${targets.length}` +
+        (failed ? ` · ${failed} failed (left as-is)` : "");
+    }
+    btn.disabled = false;
+    prog.textContent =
+      `Done — ${done - failed}/${targets.length} estimated from terrain` +
+      (failed ? `, ${failed} failed (enter manually)` : "") + ".";
   });
 
   document.getElementById("batch-publish").addEventListener("click", async () => {
