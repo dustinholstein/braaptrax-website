@@ -24,9 +24,9 @@
   </div>
 
   <div class="bt-drop" id="drop">
-    <input type="file" id="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" hidden>
-    <p class="bt-drop-title">Drop a .gpx or .kml file here</p>
-    <p class="bt-hint">or <button type="button" class="bt-link" id="browse">browse</button> · max 4&nbsp;MB · tracks are never merged</p>
+    <input type="file" id="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" multiple hidden>
+    <p class="bt-drop-title">Drop .gpx / .kml files here</p>
+    <p class="bt-hint">or <button type="button" class="bt-link" id="browse">browse</button> · multiple files OK · 4&nbsp;MB each · tracks never merged. One track → full form; many → batch.</p>
     <p class="bt-error" id="file-error"></p>
   </div>
 
@@ -106,6 +106,58 @@
       <a class="bt-btn bt-btn-ghost" href="/admin/trails.html">Cancel</a>
     </div>
   </form>
+
+  <div id="batch" hidden style="margin-top:1.5rem">
+    <div class="bt-field">
+      <span class="bt-label">Preview</span>
+      <div class="bt-map" id="batch-map"></div>
+      <span class="bt-hint" id="batch-hint">Click “Map” on a row to preview its route.</span>
+    </div>
+
+    <div class="bt-batch-defaults">
+      <span class="bt-label">Defaults — fill once, then “Apply to all”</span>
+      <div class="bt-grid-2" style="margin-top:.5rem">
+        <div class="bt-field">
+          <label class="bt-label" for="d-region">Region</label>
+          <input class="bt-input" id="d-region" placeholder="Moab, UT" maxlength="120">
+        </div>
+        <div class="bt-field">
+          <label class="bt-label" for="d-difficulty">Difficulty</label>
+          <select class="bt-select" id="d-difficulty">
+            <option value="beginner">Beginner</option>
+            <option value="intermediate" selected>Intermediate</option>
+            <option value="advanced">Advanced</option>
+            <option value="expert">Expert</option>
+          </select>
+        </div>
+      </div>
+      <div class="bt-grid-2" style="margin-top:1rem">
+        <div class="bt-field">
+          <label class="bt-label" for="d-ridetype">Ride Type</label>
+          <select class="bt-select" id="d-ridetype"></select>
+        </div>
+        <div class="bt-field">
+          <label class="bt-label" for="d-elev">Elevation Gain (feet) — for files without elevation</label>
+          <input class="bt-input" id="d-elev" type="number" min="0" step="1" value="0">
+        </div>
+      </div>
+      <div class="bt-field" style="margin-top:1rem">
+        <label class="bt-label" for="d-desc">Description (applied to all)</label>
+        <textarea class="bt-textarea" id="d-desc" maxlength="2000" style="min-height:90px"></textarea>
+      </div>
+      <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" id="apply-all" style="margin-top:.75rem">Apply defaults to all rows</button>
+    </div>
+
+    <div class="bt-list" id="batch-list" style="margin-top:1.5rem"></div>
+
+    <div class="bt-error" id="batch-error"></div>
+    <div class="bt-form-actions">
+      <button class="bt-btn bt-btn-primary" id="batch-publish">Publish selected trails</button>
+      <a class="bt-btn bt-btn-ghost" href="/admin/trails.html">Cancel</a>
+      <span class="bt-hint" id="batch-progress"></span>
+    </div>
+    <p class="bt-hint" style="margin-top:.5rem">Photos aren’t set in batch — add them later via Trails → Edit.</p>
+  </div>
 </div>
 
 <div class="bt-wrap" id="boot">
@@ -116,7 +168,7 @@
   import {
     guardPage,
     db,
-    doc, collection, setDoc, serverTimestamp,
+    doc, collection, setDoc, writeBatch, serverTimestamp,
     uploadTrailPhoto, compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, encodePolyline, routeDistanceMeters, elevationGainMeters,
     metersToMiles, metersToFeet, feetToMeters, queueToast, escapeHtml,
@@ -166,67 +218,69 @@
     })
   );
   drop.addEventListener("drop", (e) => {
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    if (e.dataTransfer.files && e.dataTransfer.files.length) {
+      handleFiles([...e.dataTransfer.files]);
+    }
   });
   fileInput.addEventListener("change", () => {
-    if (fileInput.files[0]) handleFile(fileInput.files[0]);
+    if (fileInput.files.length) handleFiles([...fileInput.files]);
   });
 
-  async function handleFile(file) {
+  // Parse every dropped file, flatten all tracks into one candidate list.
+  // 1 track -> the single full form (with photos). >1 -> batch table.
+  async function handleFiles(files) {
     fileError.textContent = "";
     picker.hidden = true;
     form.hidden = true;
-    const lower = file.name.toLowerCase();
-    if (!lower.endsWith(".gpx") && !lower.endsWith(".kml")) {
-      fileError.textContent = "Only .gpx or .kml files are supported.";
-      return;
-    }
-    if (file.size > MAX_FILE_BYTES) {
-      fileError.textContent = "File is over the 4 MB limit.";
-      return;
-    }
-    let result;
-    try {
-      result = parseTrackFile(file.name, await file.text());
-    } catch (err) {
-      console.error(err);
-      fileError.textContent = "Couldn't parse file: " + (err.message || err);
-      return;
-    }
-    if (!result.tracks.length) {
-      fileError.textContent =
-        "No usable track/route found in this file (need a line with 2+ points).";
-      return;
-    }
-    importKind = result.kind;
-    originalFileName = file.name;
+    document.getElementById("batch").hidden = true;
 
-    if (result.tracks.length === 1) {
-      chooseTrack(result.tracks[0]);
+    const candidates = [];
+    const problems = [];
+    for (const file of files) {
+      const lower = file.name.toLowerCase();
+      if (!lower.endsWith(".gpx") && !lower.endsWith(".kml")) {
+        problems.push(`${file.name}: not .gpx/.kml`);
+        continue;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        problems.push(`${file.name}: over 4 MB`);
+        continue;
+      }
+      try {
+        const result = parseTrackFile(file.name, await file.text());
+        if (!result.tracks.length) {
+          problems.push(`${file.name}: no usable track`);
+          continue;
+        }
+        result.tracks.forEach((t) =>
+          candidates.push({
+            fileName: file.name,
+            kind: result.kind,
+            name: t.name,
+            points: t.points,
+          })
+        );
+      } catch (err) {
+        console.error(err);
+        problems.push(`${file.name}: ${err.message || err}`);
+      }
+    }
+
+    if (problems.length) fileError.textContent = problems.join(" · ");
+    if (!candidates.length) {
+      if (!problems.length) {
+        fileError.textContent = "No usable track/route found.";
+      }
+      return;
+    }
+
+    if (candidates.length === 1) {
+      const c = candidates[0];
+      importKind = c.kind;
+      originalFileName = c.fileName;
+      chooseTrack({ name: c.name, points: c.points });
     } else {
-      pickerList.innerHTML = result.tracks
-        .map((t, i) => {
-          const dist = metersToMiles(
-            routeDistanceMeters(t.points.map((p) => [p.lat, p.lng]))
-          ).toFixed(1);
-          return `<div class="bt-row">
-            <div class="bt-row-main">
-              <div class="bt-row-title">${escapeHtml(t.name)}</div>
-              <div class="bt-row-meta"><span>${t.points.length} points</span><span>${dist} mi</span></div>
-            </div>
-            <div class="bt-row-actions">
-              <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" data-i="${i}">Use this</button>
-            </div>
-          </div>`;
-        })
-        .join("");
-      picker.hidden = false;
-      pickerList.querySelectorAll("button[data-i]").forEach((b) =>
-        b.addEventListener("click", () =>
-          chooseTrack(result.tracks[Number(b.dataset.i)])
-        )
-      );
+      renderBatch(candidates);
     }
   }
 
@@ -409,6 +463,210 @@
         "Publish failed: " + (err && err.message ? err.message : err);
       submitBtn.disabled = false;
       submitBtn.textContent = "Publish Imported Trail";
+    }
+  });
+
+  // ================= BATCH MODE =================
+  const RIDE_OPTS = RIDE_TYPES.map((t) => `<option value="${t}">${t}</option>`).join("");
+  const DIFF_OPTS = ["beginner", "intermediate", "advanced", "expert"]
+    .map((d) => `<option value="${d}">${d[0].toUpperCase() + d.slice(1)}</option>`)
+    .join("");
+  document.getElementById("d-ridetype").innerHTML = RIDE_OPTS;
+
+  let rows = [];
+  let batchMap = null;
+  let batchLine = null;
+
+  function ensureBatchMap() {
+    if (batchMap || !window.L) return;
+    batchMap = L.map("batch-map", { attributionControl: true });
+    const sat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community" }
+    );
+    const streets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    });
+    sat.addTo(batchMap);
+    L.control.layers({ Satellite: sat, Streets: streets }).addTo(batchMap);
+  }
+
+  function renderBatch(candidates) {
+    rows = candidates.map((c) => {
+      const latlngs = c.points.map((p) => [p.lat, p.lng]);
+      const hasEle = c.points.some(
+        (p) => typeof p.ele === "number" && isFinite(p.ele)
+      );
+      return {
+        fileName: c.fileName,
+        kind: c.kind,
+        points: c.points,
+        latlngs,
+        meters: routeDistanceMeters(latlngs),
+        hasEle,
+        include: true,
+        name: c.name.replace(/ ·.*$/, "").slice(0, 120),
+        region: "",
+        difficulty: document.getElementById("d-difficulty").value,
+        rideType: RIDE_TYPES[0],
+        elevFt: hasEle
+          ? Math.round(metersToFeet(elevationGainMeters(c.points.map((p) => p.ele))))
+          : 0,
+      };
+    });
+
+    document.getElementById("batch").hidden = false;
+    ensureBatchMap();
+    if (!batchMap) document.getElementById("batch-map").style.display = "none";
+    else setTimeout(() => batchMap.invalidateSize(), 60);
+
+    const head = `<div class="bt-brow bt-brow--head">
+      <span></span><span>Name</span><span>Region</span><span>Difficulty</span><span>Ride type</span><span>Elev ft</span><span></span>
+    </div>`;
+    const list = document.getElementById("batch-list");
+    list.innerHTML =
+      head +
+      rows
+        .map(
+          (r, i) => `<div class="bt-brow" data-i="${i}">
+        <input type="checkbox" data-k="include" ${r.include ? "checked" : ""}>
+        <span>
+          <input class="bt-input" data-k="name" value="${escapeHtml(r.name)}" maxlength="120">
+          <div class="bt-brow-meta">${escapeHtml(r.fileName)} · ${r.points.length} pts · ${metersToMiles(r.meters).toFixed(1)} mi${r.hasEle ? "" : " · no ele"}</div>
+        </span>
+        <input class="bt-input" data-k="region" value="${escapeHtml(r.region)}" placeholder="Moab, UT" maxlength="120">
+        <select class="bt-select" data-k="difficulty">${DIFF_OPTS}</select>
+        <select class="bt-select" data-k="rideType">${RIDE_OPTS}</select>
+        <input class="bt-input" data-k="elevFt" type="number" min="0" step="1" value="${r.elevFt}">
+        <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" data-act="map">Map</button>
+      </div>`
+        )
+        .join("");
+
+    // set select values + wire events
+    list.querySelectorAll(".bt-brow[data-i]").forEach((el) => {
+      const i = Number(el.dataset.i);
+      el.querySelector('[data-k="difficulty"]').value = rows[i].difficulty;
+      el.querySelector('[data-k="rideType"]').value = rows[i].rideType;
+    });
+    if (!list._wired) {
+      list._wired = true;
+      list.addEventListener("input", onRowInput);
+      list.addEventListener("change", onRowInput);
+      list.addEventListener("click", (e) => {
+        const b = e.target.closest('button[data-act="map"]');
+        if (b) previewRow(Number(b.closest(".bt-brow").dataset.i));
+      });
+    }
+  }
+
+  function onRowInput(e) {
+    const ctrl = e.target.closest("[data-k]");
+    if (!ctrl) return;
+    const rowEl = ctrl.closest(".bt-brow[data-i]");
+    const i = Number(rowEl.dataset.i);
+    const k = ctrl.dataset.k;
+    if (k === "include") {
+      rows[i].include = ctrl.checked;
+      rowEl.classList.toggle("bt-brow--off", !ctrl.checked);
+    } else if (k === "elevFt") {
+      rows[i].elevFt = Math.max(0, parseFloat(ctrl.value) || 0);
+    } else {
+      rows[i][k] = ctrl.value;
+    }
+  }
+
+  function previewRow(i) {
+    if (!batchMap) return;
+    if (batchLine) batchLine.remove();
+    batchLine = L.polyline(rows[i].latlngs, { color: "#FF6B00", weight: 4 }).addTo(batchMap);
+    batchMap.fitBounds(batchLine.getBounds(), { padding: [24, 24] });
+    document.getElementById("batch-hint").textContent =
+      `${rows[i].name || rows[i].fileName} — ${metersToMiles(rows[i].meters).toFixed(2)} mi`;
+  }
+
+  document.getElementById("apply-all").addEventListener("click", () => {
+    const region = document.getElementById("d-region").value.trim();
+    const difficulty = document.getElementById("d-difficulty").value;
+    const rideType = document.getElementById("d-ridetype").value;
+    const dElev = Math.max(0, parseFloat(document.getElementById("d-elev").value) || 0);
+    rows.forEach((r) => {
+      if (region) r.region = region;
+      r.difficulty = difficulty;
+      r.rideType = rideType;
+      if (!r.hasEle && dElev) r.elevFt = dElev;
+    });
+    // re-sync the visible controls
+    document.querySelectorAll("#batch-list .bt-brow[data-i]").forEach((el) => {
+      const i = Number(el.dataset.i);
+      if (region) el.querySelector('[data-k="region"]').value = rows[i].region;
+      el.querySelector('[data-k="difficulty"]').value = rows[i].difficulty;
+      el.querySelector('[data-k="rideType"]').value = rows[i].rideType;
+      el.querySelector('[data-k="elevFt"]').value = rows[i].elevFt;
+    });
+  });
+
+  document.getElementById("batch-publish").addEventListener("click", async () => {
+    const bErr = document.getElementById("batch-error");
+    const prog = document.getElementById("batch-progress");
+    bErr.textContent = "";
+    const sel = rows.filter((r) => r.include);
+    if (!sel.length) {
+      bErr.textContent = "No rows selected.";
+      return;
+    }
+    const desc = document.getElementById("d-desc").value.trim();
+    const bad = sel.find((r) => !r.name.trim() || !r.region.trim());
+    if (bad) {
+      bErr.textContent =
+        "Every selected row needs a Name and Region (set Region in Defaults → Apply to all).";
+      return;
+    }
+
+    const btn = document.getElementById("batch-publish");
+    btn.disabled = true;
+    let done = 0;
+    try {
+      // Firestore writeBatch caps at 500 ops; chunk well under that.
+      const CHUNK = 400;
+      for (let i = 0; i < sel.length; i += CHUNK) {
+        const slice = sel.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        for (const r of slice) {
+          const ref = doc(collection(db, "verifiedTrails"));
+          batch.set(ref, {
+            name: r.name.trim(),
+            region: r.region.trim(),
+            description: desc,
+            difficulty: r.difficulty,
+            rideType: r.rideType,
+            distanceMeters: r.meters,
+            elevationGainMeters: feetToMeters(r.elevFt),
+            polyline: encodePolyline(r.latlngs),
+            startLatitude: r.latlngs[0][0],
+            startLongitude: r.latlngs[0][1],
+            photoURLs: [],
+            isActive: true,
+            source: "imported",
+            importedFrom: r.kind,
+            originalFileName: r.fileName,
+            verifiedBy: user.uid,
+            verifiedAt: serverTimestamp(),
+          });
+        }
+        await batch.commit();
+        done += slice.length;
+        prog.textContent = `Published ${done}/${sel.length}…`;
+      }
+      queueToast(`Published ${done} imported trails.`, "success");
+      location.assign("/admin/trails.html");
+    } catch (err) {
+      console.error(err);
+      bErr.textContent =
+        `Publish failed after ${done}/${sel.length}: ` +
+        (err && err.message ? err.message : err);
+      btn.disabled = false;
     }
   });
 </script>
