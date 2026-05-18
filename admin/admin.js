@@ -322,6 +322,43 @@ export async function estimateElevationGainMeters(latlngs, opts = {}) {
   return elevationGainMeters(eles, opts.windowSize || 3);
 }
 
+// Reverse-geocode a point into a "Place, ST" region string via
+// BigDataCloud's key-less, CORS-enabled client endpoint (designed for
+// browser use). Picks city -> locality -> nearest admin area, plus the
+// 2-letter state/subdivision. Returns "" if nothing usable. Best fed the
+// route midpoint, which is more representative than a trailhead.
+export async function reverseRegion(lat, lng, opts = {}) {
+  const res = await fetch(
+    `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat.toFixed(
+      5
+    )}&longitude=${lng.toFixed(5)}&localityLanguage=en`,
+    { signal: opts.signal }
+  );
+  if (!res.ok) throw new Error(`Geocoder HTTP ${res.status}`);
+  const j = await res.json();
+  const admins = (j.localityInfo && j.localityInfo.administrative) || [];
+  const place =
+    j.city ||
+    j.locality ||
+    (admins.length ? admins[admins.length - 1].name : "") ||
+    j.principalSubdivision ||
+    "";
+  let st = "";
+  if (j.principalSubdivisionCode && j.principalSubdivisionCode.includes("-")) {
+    st = j.principalSubdivisionCode.split("-").pop();
+  } else if (j.principalSubdivision) {
+    st = j.principalSubdivision;
+  }
+  return [place, st].filter(Boolean).join(", ").trim();
+}
+
+// Midpoint (by index) of a [[lat,lng],...] path — a decent single sample
+// for "where is this trail" reverse geocoding.
+export function pathMidpoint(latlngs) {
+  if (!latlngs || !latlngs.length) return null;
+  return latlngs[Math.floor(latlngs.length / 2)];
+}
+
 // ---- Client-side image compression ---------------------------------------
 // Resize so the longest side is <= maxDim, re-encode as JPEG at `quality`.
 // Resolves with a Blob. The caller is responsible for the >5MB rejection so
