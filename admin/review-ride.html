@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Ride Review — BraapTrax Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div class="bt-wrap" id="content" hidden>
+  <div class="bt-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap">
+    <div>
+      <div class="bt-eyebrow">Admin · Ride Review</div>
+      <h1 class="bt-title" id="r-title">Ride</h1>
+      <p class="bt-sub" id="r-sub"></p>
+    </div>
+    <div class="bt-row-actions">
+      <a class="bt-btn bt-btn-ghost" id="back-btn" href="/admin/review-rides.html">Back to Review</a>
+      <a class="bt-btn bt-btn-primary" id="promote-btn" href="#">Promote to Verified Trail</a>
+    </div>
+  </div>
+
+  <div class="bt-field">
+    <span class="bt-label">Route</span>
+    <div class="bt-map" id="map"></div>
+    <span class="bt-hint" id="map-hint"></span>
+  </div>
+
+  <div class="bt-rider" id="rider"></div>
+
+  <div class="bt-field">
+    <span class="bt-label">Ride stats</span>
+    <div class="bt-stats" id="stats"></div>
+  </div>
+
+  <div class="bt-field" id="notes-wrap" hidden>
+    <span class="bt-label">Rider notes</span>
+    <p class="bt-sub" id="notes" style="white-space:pre-wrap"></p>
+  </div>
+
+  <div class="bt-field" id="photos-wrap" hidden>
+    <span class="bt-label">Photos</span>
+    <div class="bt-photostrip" id="photos"></div>
+  </div>
+</div>
+
+<div class="bt-wrap" id="boot">
+  <div class="bt-loading"><span class="bt-spinner"></span></div>
+</div>
+
+<script type="module">
+  import {
+    guardPage,
+    db,
+    doc, getDoc,
+    decodePolyline, metersToMiles, metersToFeet, rideTypeIcon,
+    formatDate, mpsToMph, formatDuration, escapeHtml,
+    getUserDoc, userDisplayName, userAvatarRaw, resolvePhotoDisplayURL,
+  } from "/admin/admin.js";
+
+  await guardPage("review-rides");
+
+  const boot = document.getElementById("boot");
+  const content = document.getElementById("content");
+  function fail(msg) {
+    boot.innerHTML = `<div class="bt-empty">${escapeHtml(msg)}<br><br><a class="bt-btn bt-btn-ghost" href="/admin/review-rides.html">Back to Review</a></div>`;
+  }
+
+  const rideId = new URLSearchParams(location.search).get("rideId");
+  if (!rideId) {
+    fail("No ride specified.");
+    throw new Error("missing rideId");
+  }
+
+  let snap;
+  try {
+    snap = await getDoc(doc(db, "rides", rideId));
+  } catch (e) {
+    fail("Failed to load ride: " + (e.message || e));
+    throw e;
+  }
+  if (!snap.exists()) {
+    fail("Ride not found.");
+    throw new Error("not found");
+  }
+  const r = snap.data();
+  const user = await getUserDoc(r.userId);
+
+  boot.remove();
+  content.hidden = false;
+
+  // Header + promote/back
+  document.getElementById("r-title").textContent =
+    r.trailName || r.name || "Untitled ride";
+  const priv = r.privacy === "friends" ? "Friends only" : "Public";
+  document.getElementById("r-sub").textContent =
+    `${userDisplayName(user)} · ${formatDate(r.createdAt || r.startTime)} · ${priv}`;
+  document.getElementById("promote-btn").href =
+    "/admin/publish.html?rideId=" + encodeURIComponent(rideId);
+
+  // Rider card (avatar + username)
+  const riderEl = document.getElementById("rider");
+  const name = userDisplayName(user);
+  riderEl.innerHTML = `
+    <span class="bt-avatar bt-avatar--lg">${escapeHtml((name || "?").charAt(0).toUpperCase())}</span>
+    <div>
+      <div class="bt-row-title">${escapeHtml(name)}</div>
+      <div class="bt-row-meta"><span>Original rider — credited as the trail source</span></div>
+    </div>`;
+  (async () => {
+    const raw = userAvatarRaw(user);
+    if (!raw) return;
+    let src = raw;
+    try {
+      if (!/^https?:\/\//i.test(raw)) src = await resolvePhotoDisplayURL(raw);
+    } catch (_) { return; }
+    if (!src) return;
+    const av = riderEl.querySelector(".bt-avatar");
+    av.style.backgroundImage = `url("${src}")`;
+    av.classList.add("bt-avatar--img");
+    av.textContent = "";
+  })();
+
+  // Stats grid
+  const mi = metersToMiles(Number(r.distance) || 0).toFixed(2);
+  const ft = Math.round(metersToFeet(Number(r.elevationGain) || 0)).toLocaleString();
+  const dur = formatDuration(r.movingDuration || r.totalDuration);
+  const stat = (label, val) =>
+    `<div class="bt-stat"><span class="bt-stat-v">${escapeHtml(val)}</span><span class="bt-stat-l">${label}</span></div>`;
+  document.getElementById("stats").innerHTML = [
+    stat("Date", formatDate(r.createdAt || r.startTime)),
+    stat("Ride type", `${rideTypeIcon(r.rideType)} ${escapeHtml(r.rideType || "—")}`),
+    stat("Distance", `${mi} mi`),
+    stat("Elevation gain", `${ft} ft`),
+    stat("Max speed", `${mpsToMph(r.maxSpeed).toFixed(1)} mph`),
+    stat("Avg speed", `${mpsToMph(r.avgSpeed).toFixed(1)} mph`),
+    stat("Duration", dur),
+    stat("Privacy", priv),
+  ].join("");
+
+  // Notes
+  const notes = (r.description || r.notes || "").trim();
+  if (notes) {
+    document.getElementById("notes-wrap").hidden = false;
+    document.getElementById("notes").textContent = notes;
+  }
+
+  // Map
+  const coords = decodePolyline(r.encodedPolyline || r.polyline || "");
+  const mapHint = document.getElementById("map-hint");
+  if (coords.length && window.L) {
+    const map = L.map("map", { attributionControl: true });
+    const sat = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community" }
+    );
+    const streets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    });
+    sat.addTo(map);
+    L.control.layers({ Satellite: sat, Streets: streets }).addTo(map);
+    const line = L.polyline(coords, { color: "#FF6B00", weight: 4 }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [24, 24] });
+    setTimeout(() => map.invalidateSize(), 60);
+  } else {
+    document.getElementById("map").style.display = "none";
+    mapHint.textContent = coords.length
+      ? "Map library failed to load."
+      : "No route data on this ride.";
+  }
+
+  // Photos (Storage paths -> display URLs), horizontal scroll
+  const photos = Array.isArray(r.photos) ? r.photos : [];
+  if (photos.length) {
+    document.getElementById("photos-wrap").hidden = false;
+    const strip = document.getElementById("photos");
+    strip.innerHTML = photos
+      .map(() => `<div class="bt-photoslide"><span class="bt-spinner"></span></div>`)
+      .join("");
+    photos.forEach(async (p, i) => {
+      let src = p;
+      try {
+        if (!/^https?:\/\//i.test(p)) src = await resolvePhotoDisplayURL(p);
+      } catch (_) { src = ""; }
+      const slide = strip.children[i];
+      if (slide) {
+        slide.innerHTML = src
+          ? `<img src="${escapeHtml(src)}" alt="" loading="lazy">`
+          : `<span class="bt-hint">unavailable</span>`;
+      }
+    });
+  }
+</script>
+
+</body>
+</html>

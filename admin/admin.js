@@ -48,6 +48,7 @@ const LOGIN_PAGE = ADMIN_BASE + "index.html";
 
 export const NAV_ITEMS = [
   { key: "my-rides", label: "My Rides", href: ADMIN_BASE + "my-rides.html" },
+  { key: "review-rides", label: "Review Rides", href: ADMIN_BASE + "review-rides.html" },
   { key: "import", label: "Import", href: ADMIN_BASE + "import.html" },
   { key: "draw", label: "Draw", href: ADMIN_BASE + "manual.html" },
   { key: "trails", label: "Trails", href: ADMIN_BASE + "trails.html" },
@@ -94,6 +95,50 @@ export function formatDate(v) {
 export function toMillis(v) {
   const d = toDate(v);
   return d ? d.getTime() : 0;
+}
+
+// Ride speeds/durations are stored SI (m/s, seconds).
+export function mpsToMph(v) {
+  return (Number(v) || 0) * 2.2369362920544;
+}
+export function formatDuration(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+// In-memory user-doc cache so review lists don't refetch the same rider
+// across rows. Resolves to the user data object (or null). Never throws.
+const _userCache = new Map();
+export async function getUserDoc(uid) {
+  if (!uid) return null;
+  if (_userCache.has(uid)) return _userCache.get(uid);
+  let data = null;
+  try {
+    const snap = await getDoc(doc(db, "users", uid));
+    data = snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.warn("[users] fetch failed for", uid, e.message || e);
+  }
+  _userCache.set(uid, data);
+  return data;
+}
+
+// Best-effort display name / avatar from a user doc (field names vary).
+export function userDisplayName(u, fallback = "Unknown rider") {
+  if (!u) return fallback;
+  return (
+    u.username || u.displayName || u.name || u.handle || fallback
+  );
+}
+export function userAvatarRaw(u) {
+  if (!u) return "";
+  return (
+    u.photoURL || u.avatarURL || u.profileImageURL || u.photo || u.avatar || ""
+  );
 }
 
 // Must stay byte-identical to the iOS RideType enum raw values — the app
