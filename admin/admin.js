@@ -444,6 +444,30 @@ export function pathMidpoint(latlngs) {
   return latlngs[Math.floor(latlngs.length / 2)];
 }
 
+// Riders often prefix ride/trail names with the date they rode
+// ("5/9/26 Rock n Roll Trail"). When we promote a ride into a trail
+// the date is noise — the trail isn't dated. Strip a single leading
+// date-like token plus trailing punctuation. Conservative: only
+// matches recognizable date shapes so names like "5 Mile Loop" or
+// "Highway 191" are left alone.
+const _LEADING_DATE_RE = new RegExp(
+  "^\\s*(?:" +
+    // 5/9/26, 05-09-2026, 2026.05.09 etc.
+    "\\d{1,4}[\\-/.]\\d{1,2}[\\-/.]\\d{1,4}" +
+    // 5/9 (no year)
+    "|\\d{1,2}[\\-/.]\\d{1,2}" +
+    // May 9, May 9 2026, Sept. 21, 2026
+    "|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\\.?\\s+\\d{1,2}(?:[,]?\\s*\\d{2,4})?" +
+  ")\\s*[-—:·]?\\s*",
+  "i"
+);
+export function stripLeadingDate(name) {
+  const s = String(name == null ? "" : name);
+  const cleaned = s.replace(_LEADING_DATE_RE, "").trim();
+  // Don't strip if it would leave us with nothing meaningful.
+  return cleaned.length >= 2 ? cleaned : s.trim();
+}
+
 // Lightweight search-index projection of a trail. Stored in the separate
 // `trailIndex` collection (same doc id) so the Trails page can list/search
 // without ever downloading polylines. NEVER include the polyline here.

@@ -152,6 +152,7 @@
     compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, queueToast, escapeHtml,
     buildTrailIndex, TRAIL_INDEX_COLLECTION,
+    stripLeadingDate,
   } from "/admin/admin.js";
 
   const params = new URLSearchParams(location.search);
@@ -316,7 +317,7 @@
 
   if (isRide) {
     // Sensible defaults from the ride; admin can override before publishing.
-    document.getElementById("name").value = (data.trailName || "").trim();
+    document.getElementById("name").value = stripLeadingDate(data.trailName || "");
     if (data.description) {
       document.getElementById("description").value = data.description;
     }
