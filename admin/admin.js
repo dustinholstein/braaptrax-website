@@ -284,9 +284,48 @@ export function resampleByDistanceMeters(latlngs, stepMeters = 60, maxPoints = 3
 
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Process-wide throttle so concurrent/rapid elevation lookups (batch
+// import, overlapping auto-runs) can't burst the free Open-Meteo tier.
+// Serializes every call with a minimum gap.
+let _omChain = Promise.resolve();
+const _OM_MIN_GAP_MS = 450;
+function _omThrottle() {
+  const p = _omChain.then(() => _sleep(_OM_MIN_GAP_MS));
+  _omChain = p.catch(() => {});
+  return p;
+}
+
+// Fetch with retry/backoff: 429 (rate limited) and 5xx are retried,
+// honoring Retry-After when present, with exponential fallback.
+async function _omFetch(url, opts, attempts = 5) {
+  let delay = 1200;
+  for (let i = 0; i < attempts; i++) {
+    await _omThrottle();
+    let res;
+    try {
+      res = await fetch(url, { signal: opts.signal });
+    } catch (e) {
+      if (i === attempts - 1) throw e;
+      await _sleep(delay);
+      delay = Math.min(delay * 2, 10000);
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500) {
+      if (i === attempts - 1) {
+        throw new Error(`Elevation service HTTP ${res.status}`);
+      }
+      const ra = parseInt(res.headers.get("retry-after") || "", 10);
+      await _sleep(ra > 0 ? ra * 1000 : delay);
+      delay = Math.min(delay * 2, 10000);
+      continue;
+    }
+    return res;
+  }
+}
+
 // Look up ground elevation (meters) for [[lat,lng],...] via the free,
 // key-less, CORS-enabled Open-Meteo Elevation API (Copernicus DEM, ~90 m).
-// Batched at 100 coords/request as the API requires.
+// Batched at 100 coords/request as the API requires; throttled + retried.
 export async function fetchElevationsMeters(points, opts = {}) {
   const chunk = opts.chunk || 100;
   const out = [];
@@ -294,17 +333,15 @@ export async function fetchElevationsMeters(points, opts = {}) {
     const part = points.slice(i, i + chunk);
     const lat = part.map((p) => p[0].toFixed(6)).join(",");
     const lng = part.map((p) => p[1].toFixed(6)).join(",");
-    const res = await fetch(
+    const res = await _omFetch(
       `https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`,
-      { signal: opts.signal }
+      opts
     );
-    if (!res.ok) throw new Error(`Elevation service HTTP ${res.status}`);
     const j = await res.json();
     if (!j || !Array.isArray(j.elevation)) {
       throw new Error("Elevation service returned no data");
     }
     j.elevation.forEach((e) => out.push(e));
-    if (i + chunk < points.length) await _sleep(150);
   }
   return out;
 }
@@ -312,11 +349,13 @@ export async function fetchElevationsMeters(points, opts = {}) {
 // Estimate total climb (meters) for a 2D path by sampling the terrain DEM.
 // It's an estimate from ~90 m data — not barometric truth, but consistent
 // and good enough for trail metadata when the file has no elevation.
+// Default sampling kept at <=100 points so each track is a single request
+// (keeps us well under the elevation API's rate limit).
 export async function estimateElevationGainMeters(latlngs, opts = {}) {
   const sampled = resampleByDistanceMeters(
     latlngs,
     opts.stepMeters || 60,
-    opts.maxPoints || 384
+    opts.maxPoints || 100
   );
   if (sampled.length < 2) return 0;
   const eles = await fetchElevationsMeters(sampled, opts);
