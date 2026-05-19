@@ -154,7 +154,7 @@
     compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, queueToast, escapeHtml,
     buildTrailIndex, TRAIL_INDEX_COLLECTION,
-    stripLeadingDate, reverseRegion, pathMidpoint,
+    stripLeadingDate, reverseRegion, pathMidpoint, rideDifficultyToTrail,
   } from "/admin/admin.js";
 
   const params = new URLSearchParams(location.search);
@@ -317,6 +317,9 @@
     if (data.description) {
       document.getElementById("description").value = data.description;
     }
+    // Rides store difficulty as a number — map into the trail enum.
+    const mapped = rideDifficultyToTrail(data.difficulty);
+    if (mapped) document.getElementById("difficulty").value = mapped;
   }
 
   // Mark fields as manually edited so background syncs / auto-fills don't
