@@ -69,6 +69,7 @@
       <div class="bt-field">
         <label class="bt-label" for="region">Region <span class="req">*</span></label>
         <input class="bt-input" type="text" id="region" placeholder="Moab, UT" maxlength="120" required>
+        <span class="bt-hint" id="region-hint"></span>
       </div>
     </div>
 
@@ -100,7 +101,8 @@
       </div>
       <div class="bt-field">
         <label class="bt-label" for="elevation">Elevation Gain (feet)</label>
-        <input class="bt-input" type="text" id="elevation" readonly>
+        <input class="bt-input" type="number" id="elevation" min="0" step="1" value="0">
+        <span class="bt-hint" id="elev-hint"></span>
       </div>
     </div>
 
@@ -152,7 +154,7 @@
     compressImage, MAX_PHOTO_BYTES, MAX_PHOTOS,
     RIDE_TYPES, queueToast, escapeHtml,
     buildTrailIndex, TRAIL_INDEX_COLLECTION,
-    stripLeadingDate,
+    stripLeadingDate, reverseRegion, pathMidpoint,
   } from "/admin/admin.js";
 
   const params = new URLSearchParams(location.search);
@@ -246,16 +248,18 @@
     }
   }
 
-  // Distance + start coords are always derived (from the ride, the existing
-  // trail, or the manually drawn route) and shown read-only. Elevation is
-  // derived for ride/edit but admin-entered for manual.
+  // Distance + start coords are derived and shown read-only. Elevation is
+  // prefilled (from the ride/trail or 0 for manual) and editable; once the
+  // admin types in it, elevManual=true and we stop overwriting it.
+  let elevManual = false;
+  let regionManual = false;
   function syncDerivedFields() {
     document.getElementById("distance").value = metersToMiles(
       src.distanceMeters
     ).toFixed(2);
-    if (!isManual) {
+    if (!elevManual) {
       document.getElementById("elevation").value = String(
-        Math.round(metersToFeet(src.elevationGainMeters))
+        Math.round(metersToFeet(Number(src.elevationGainMeters) || 0))
       );
     }
     document.getElementById("startLat").value = Number.isFinite(
@@ -304,14 +308,6 @@
     document.getElementById("page-title").textContent = "New Manual Trail";
     document.getElementById("page-sub").textContent =
       "Click the map to trace the route, then fill in the details.";
-    // Elevation gain has no source for a manual trail — admin enters feet.
-    const elev = document.getElementById("elevation");
-    elev.readOnly = false;
-    elev.type = "number";
-    elev.min = "0";
-    elev.step = "1";
-    elev.value = "0";
-    elev.placeholder = "0";
     document.getElementById("route-req").hidden = false;
   }
 
@@ -321,6 +317,41 @@
     if (data.description) {
       document.getElementById("description").value = data.description;
     }
+  }
+
+  // Mark fields as manually edited so background syncs / auto-fills don't
+  // clobber what the admin typed.
+  document.getElementById("elevation").addEventListener("input", () => {
+    elevManual = true;
+  });
+  document.getElementById("region").addEventListener("input", () => {
+    regionManual = true;
+  });
+
+  // Ride promotion has no region on the ride doc — reverse-geocode the
+  // route midpoint as a starting point. Skips edit mode (existing trail
+  // already has a region) and manual mode (route may not be drawn yet).
+  if (isRide && !document.getElementById("region").value.trim()) {
+    const hint = document.getElementById("region-hint");
+    (async () => {
+      const mid = pathMidpoint(coords);
+      if (!mid) return;
+      try {
+        const region = await reverseRegion(mid[0], mid[1]);
+        if (regionManual) return;
+        if (region) {
+          document.getElementById("region").value = region;
+          if (hint) hint.textContent = "Detected from the route — edit to override.";
+        } else if (hint) {
+          hint.textContent = "Couldn't detect a region — enter it manually.";
+        }
+      } catch (err) {
+        console.warn("[publish] region detect failed:", err.message || err);
+        if (hint) {
+          hint.textContent = "Region lookup failed — enter it manually.";
+        }
+      }
+    })();
   }
 
   document.querySelector(".bt-form-actions a").href = isRide
@@ -830,14 +861,12 @@
       errEl.textContent = "Name and Region are required.";
       return;
     }
-    if (isManual) {
-      // Admin-entered elevation (feet -> meters); a number is required by
-      // the contract, 0 is acceptable.
-      src.elevationGainMeters = Math.max(
-        0,
-        feetToMeters(parseFloat(document.getElementById("elevation").value) || 0)
-      );
-    }
+    // The elevation field is editable in every mode now — take whatever
+    // the admin sees (prefilled or hand-corrected) as the source of truth.
+    src.elevationGainMeters = Math.max(
+      0,
+      feetToMeters(parseFloat(document.getElementById("elevation").value) || 0)
+    );
     // A verified trail must have a route (the route is editable in every
     // mode, so this also catches clearing/deleting all points).
     if (!src.polyline) {
