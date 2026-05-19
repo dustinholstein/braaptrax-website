@@ -468,12 +468,10 @@ export function stripLeadingDate(name) {
   return cleaned.length >= 2 ? cleaned : s.trim();
 }
 
-// Rides store difficulty as a number (the iOS picker is 1..5);
+// Rides store difficulty as a number on the iOS 1..4 picker;
 // verifiedTrails stores one of beginner/intermediate/advanced/expert.
-// Conservative mapping that errs on the safer side (2 -> intermediate,
-// not beginner) so we never advertise a non-trivial ride as a beginner
-// route. Returns null if there is no usable value — caller keeps the
-// HTML default (Intermediate).
+// Direct 1:1 mapping. Returns null if there is no usable value — the
+// caller keeps the HTML default (Intermediate).
 export function rideDifficultyToTrail(d) {
   if (d == null) return null;
   if (typeof d === "string") {
@@ -485,8 +483,8 @@ export function rideDifficultyToTrail(d) {
   const n = Number(d);
   if (!Number.isFinite(n)) return null;
   if (n <= 1) return "beginner";
-  if (n <= 3) return "intermediate";
-  if (n <= 4) return "advanced";
+  if (n === 2) return "intermediate";
+  if (n === 3) return "advanced";
   return "expert";
 }
 
