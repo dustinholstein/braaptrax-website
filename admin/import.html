@@ -774,7 +774,7 @@
       if (!force && r.elevTouched) { done++; continue; } // admin took over
       try {
         const gain = await estimateElevationGainMeters(r.latlngs, {
-          maxPoints: 256,
+          maxPoints: 100,
         });
         if (runId !== elevBatchRun) return;
         if (!force && r.elevTouched) { done++; continue; }
