@@ -908,7 +908,10 @@
           ...editable,
           source: "user_ride",
           sourceRideId: rideId,
-          sourceUserId: user.uid,
+          // Credit the ORIGINAL rider (the ride's owner), not the admin
+          // doing the promotion — supports crowdsourcing rides from any
+          // user. verifiedBy below records who curated it.
+          sourceUserId: data.userId || user.uid,
           verifiedBy: user.uid,
           verifiedAt: serverTimestamp(),
         });

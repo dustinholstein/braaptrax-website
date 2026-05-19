@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Review Rides — BraapTrax Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+
+<div class="bt-wrap" id="content" hidden>
+  <div class="bt-header">
+    <div class="bt-eyebrow">Admin</div>
+    <h1 class="bt-title">Review Rides</h1>
+    <p class="bt-sub">Public &amp; friends-only rides from every rider. Promote good ones to Verified Trails — the original rider is credited.</p>
+  </div>
+
+  <details class="bt-filterbox" id="filterbox">
+    <summary class="bt-label" style="cursor:pointer">Filters</summary>
+    <div class="bt-filterbody">
+      <div class="bt-field">
+        <span class="bt-label">Ride type</span>
+        <div id="f-types" class="bt-checkrow"></div>
+      </div>
+      <div class="bt-grid-2">
+        <div class="bt-field">
+          <label class="bt-label" for="f-from">Date from</label>
+          <input class="bt-input" type="date" id="f-from">
+        </div>
+        <div class="bt-field">
+          <label class="bt-label" for="f-to">Date to</label>
+          <input class="bt-input" type="date" id="f-to">
+        </div>
+      </div>
+      <div class="bt-grid-2">
+        <div class="bt-field">
+          <label class="bt-label" for="f-dmin">Min distance (mi)</label>
+          <input class="bt-input" type="number" id="f-dmin" min="0" step="1">
+        </div>
+        <div class="bt-field">
+          <label class="bt-label" for="f-dmax">Max distance (mi)</label>
+          <input class="bt-input" type="number" id="f-dmax" min="0" step="1">
+        </div>
+      </div>
+      <div class="bt-field">
+        <label class="bt-label" for="f-user">User (username starts with)</label>
+        <input class="bt-input" type="search" id="f-user" placeholder="e.g. dustin">
+      </div>
+      <div class="bt-field">
+        <span class="bt-label">Region</span>
+        <div class="bt-checkrow" id="f-regions"></div>
+      </div>
+      <div class="bt-row-actions">
+        <button class="bt-btn bt-btn-ghost bt-btn-sm" id="f-clear" type="button">Clear filters</button>
+        <span class="bt-hint" id="f-count"></span>
+      </div>
+      <p class="bt-hint">Filters apply to loaded rides — use “Load more” to search further back.</p>
+    </div>
+  </details>
+
+  <div id="rides" style="margin-top:1.5rem"></div>
+  <div class="bt-center" id="more-wrap" hidden>
+    <button class="bt-btn bt-btn-ghost" id="more-btn">Load more</button>
+  </div>
+</div>
+
+<div class="bt-wrap" id="boot">
+  <div class="bt-loading"><span class="bt-spinner"></span></div>
+</div>
+
+<script type="module">
+  import {
+    guardPage,
+    db,
+    collection, query, where, orderBy, limit, startAfter, getDocs,
+    decodePolyline, metersToMiles, metersToFeet, rideTypeIcon,
+    formatDate, toMillis, escapeHtml,
+    RIDE_TYPES, getUserDoc, userDisplayName, userAvatarRaw,
+    resolvePhotoDisplayURL,
+  } from "/admin/admin.js";
+
+  const PAGE_SIZE = 50;
+  await guardPage("review-rides");
+  document.getElementById("boot").remove();
+  document.getElementById("content").hidden = false;
+
+  const ridesEl = document.getElementById("rides");
+  const moreWrap = document.getElementById("more-wrap");
+  const moreBtn = document.getElementById("more-btn");
+  const fCount = document.getElementById("f-count");
+
+  const REGION_PRESETS = {
+    "Moab, UT": { latMin: 38.2, latMax: 38.95, lngMin: -110.05, lngMax: -109.2 },
+    "Western Slope, CO": { latMin: 38.8, latMax: 39.8, lngMin: -109.1, lngMax: -107.2 },
+    "Front Range, CO": { latMin: 38.6, latMax: 40.7, lngMin: -105.75, lngMax: -104.5 },
+  };
+
+  // ---- Filter UI ----
+  const fTypes = document.getElementById("f-types");
+  fTypes.innerHTML = RIDE_TYPES.map(
+    (t) => `<label class="bt-check"><input type="checkbox" value="${t}">${escapeHtml(t)}</label>`
+  ).join("");
+  const fRegions = document.getElementById("f-regions");
+  fRegions.innerHTML =
+    Object.keys(REGION_PRESETS)
+      .map(
+        (k) => `<label class="bt-check"><input type="radio" name="rgn" value="${escapeHtml(k)}">${escapeHtml(k)}</label>`
+      )
+      .join("") +
+    `<label class="bt-check"><input type="radio" name="rgn" value="" checked>Anywhere</label>`;
+
+  const F = {
+    from: document.getElementById("f-from"),
+    to: document.getElementById("f-to"),
+    dmin: document.getElementById("f-dmin"),
+    dmax: document.getElementById("f-dmax"),
+    user: document.getElementById("f-user"),
+  };
+
+  // Restore filter state (set when leaving for a single review).
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("bt_review_filters") || "null");
+    if (saved) {
+      F.from.value = saved.from || "";
+      F.to.value = saved.to || "";
+      F.dmin.value = saved.dmin || "";
+      F.dmax.value = saved.dmax || "";
+      F.user.value = saved.user || "";
+      (saved.types || []).forEach((t) => {
+        const cb = fTypes.querySelector(`input[value="${CSS.escape(t)}"]`);
+        if (cb) cb.checked = true;
+      });
+      if (saved.region) {
+        const r = fRegions.querySelector(`input[value="${CSS.escape(saved.region)}"]`);
+        if (r) r.checked = true;
+      }
+      if (saved.open) document.getElementById("filterbox").open = true;
+    }
+  } catch (_) {}
+
+  function currentFilters() {
+    return {
+      types: [...fTypes.querySelectorAll("input:checked")].map((c) => c.value),
+      from: F.from.value,
+      to: F.to.value,
+      dmin: F.dmin.value,
+      dmax: F.dmax.value,
+      user: F.user.value.trim(),
+      region: (fRegions.querySelector("input:checked") || {}).value || "",
+      open: document.getElementById("filterbox").open,
+    };
+  }
+  function saveFilters() {
+    try {
+      sessionStorage.setItem("bt_review_filters", JSON.stringify(currentFilters()));
+    } catch (_) {}
+  }
+
+  // ---- Data ----
+  let lastDoc = null;
+  let exhausted = false;
+  let clientFilterPrivacy = false; // fallback path: filter privacy on client
+  const allDocs = []; // accumulated ride docs (snapshots' data + id)
+  let userMatchIds = null; // Set of userIds matching the username filter, or null
+
+  function rideStart(r) {
+    if (Number.isFinite(r.startLatitude) && Number.isFinite(r.startLongitude)) {
+      return [r.startLatitude, r.startLongitude];
+    }
+    const c = decodePolyline(r.encodedPolyline || r.polyline || "");
+    return c.length ? c[0] : null;
+  }
+
+  function passes(r) {
+    const f = currentFilters();
+    if (f.types.length && !f.types.includes(r.rideType)) return false;
+    const ms = toMillis(r.createdAt || r.startTime);
+    if (f.from && ms < new Date(f.from + "T00:00:00").getTime()) return false;
+    if (f.to && ms > new Date(f.to + "T23:59:59").getTime()) return false;
+    const mi = metersToMiles(Number(r.distance) || 0);
+    if (f.dmin !== "" && mi < Number(f.dmin)) return false;
+    if (f.dmax !== "" && mi > Number(f.dmax)) return false;
+    if (userMatchIds && !userMatchIds.has(r.userId)) return false;
+    if (f.region && REGION_PRESETS[f.region]) {
+      const s = rideStart(r);
+      const b = REGION_PRESETS[f.region];
+      if (!s || s[0] < b.latMin || s[0] > b.latMax || s[1] < b.lngMin || s[1] > b.lngMax) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function avatarHtml(uid, name) {
+    const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
+    return `<span class="bt-avatar" data-uid="${escapeHtml(uid)}">${escapeHtml(initial)}</span>`;
+  }
+
+  function rideRow(r) {
+    const mi = metersToMiles(Number(r.distance) || 0).toFixed(1);
+    const ft = Math.round(metersToFeet(Number(r.elevationGain) || 0));
+    const priv = r.privacy === "friends" ? "Friends" : "Public";
+    const uname = (r.__user && userDisplayName(r.__user)) || "…";
+    return `
+      <div class="bt-row">
+        ${avatarHtml(r.userId, uname)}
+        <div class="bt-row-icon">${rideTypeIcon(r.rideType)}</div>
+        <div class="bt-row-main">
+          <div class="bt-row-title">${escapeHtml(r.trailName || r.name || "Untitled ride")}
+            <span class="bt-uname" data-uid="${escapeHtml(r.userId)}">· ${escapeHtml(uname)}</span></div>
+          <div class="bt-row-meta">
+            <span>${formatDate(r.createdAt || r.startTime)}</span>
+            <span>${escapeHtml(r.rideType || "ride")}</span>
+            <span>${mi} mi</span>
+            <span>${ft.toLocaleString()} ft gain</span>
+            <span class="bt-badge bt-badge--source">${priv}</span>
+          </div>
+        </div>
+        <div class="bt-row-actions">
+          <a class="bt-btn bt-btn-primary bt-btn-sm" href="/admin/review-ride.html?rideId=${encodeURIComponent(r.id)}">Review</a>
+        </div>
+      </div>`;
+  }
+
+  async function hydrateUsers(rows) {
+    const ids = [...new Set(rows.map((r) => r.userId).filter(Boolean))];
+    await Promise.all(
+      ids.map(async (uid) => {
+        const u = await getUserDoc(uid);
+        rows.forEach((r) => {
+          if (r.userId === uid) r.__user = u;
+        });
+        const name = userDisplayName(u);
+        document
+          .querySelectorAll(`.bt-uname[data-uid="${CSS.escape(uid)}"]`)
+          .forEach((el) => (el.textContent = "· " + name));
+        // resolve avatar (storage path or url) -> swap into the circle
+        const raw = userAvatarRaw(u);
+        if (raw) {
+          let src = raw;
+          try {
+            if (!/^https?:\/\//i.test(raw)) src = await resolvePhotoDisplayURL(raw);
+          } catch (_) { src = ""; }
+          if (src) {
+            document
+              .querySelectorAll(`.bt-avatar[data-uid="${CSS.escape(uid)}"]`)
+              .forEach((el) => {
+                el.style.backgroundImage = `url("${src}")`;
+                el.classList.add("bt-avatar--img");
+                el.textContent = "";
+              });
+          }
+        }
+      })
+    );
+  }
+
+  function render() {
+    const rows = allDocs.filter(passes);
+    fCount.textContent = `${rows.length} shown / ${allDocs.length} loaded${exhausted ? "" : "+"}`;
+    if (!rows.length) {
+      ridesEl.innerHTML = `<div class="bt-empty">${
+        allDocs.length ? "No loaded rides match these filters." : "No eligible rides found."
+      }</div>`;
+      return;
+    }
+    ridesEl.innerHTML =
+      `<div class="bt-list">` + rows.map(rideRow).join("") + `</div>`;
+    hydrateUsers(rows);
+  }
+
+  async function loadPage() {
+    if (exhausted) return;
+    let snap;
+    try {
+      if (clientFilterPrivacy) {
+        let q = query(
+          collection(db, "rides"),
+          orderBy("createdAt", "desc"),
+          limit(PAGE_SIZE)
+        );
+        if (lastDoc) q = query(q, startAfter(lastDoc));
+        snap = await getDocs(q);
+      } else {
+        let q = query(
+          collection(db, "rides"),
+          where("privacy", "in", ["public", "friends"]),
+          orderBy("createdAt", "desc"),
+          limit(PAGE_SIZE)
+        );
+        if (lastDoc) q = query(q, startAfter(lastDoc));
+        snap = await getDocs(q);
+      }
+    } catch (e) {
+      if (
+        !clientFilterPrivacy &&
+        (e.code === "failed-precondition" || /index/i.test(e.message || ""))
+      ) {
+        // No composite (privacy in + createdAt desc) index — fall back to
+        // ordering by createdAt and filtering privacy on the client.
+        console.warn("[review] index missing, client-filtering privacy:", e.message);
+        clientFilterPrivacy = true;
+        lastDoc = null;
+        return loadPage();
+      }
+      console.error(e);
+      ridesEl.innerHTML = `<div class="bt-empty">Couldn't load rides. ${escapeHtml(e.message || e)}<br><br>If this mentions an index, open the link in the console to create it.</div>`;
+      return;
+    }
+    lastDoc = snap.docs[snap.docs.length - 1] || lastDoc;
+    snap.forEach((d) => {
+      const data = d.data();
+      if (clientFilterPrivacy && !["public", "friends"].includes(data.privacy)) {
+        return; // exclude private in fallback mode
+      }
+      allDocs.push({ id: d.id, ...data });
+    });
+    if (snap.size < PAGE_SIZE) exhausted = true;
+    moreWrap.hidden = exhausted;
+  }
+
+  // Username filter → resolve to a set of userIds (prefix query on the
+  // users collection), then filter rides client-side by that set.
+  let userQueryTimer = null;
+  async function resolveUserFilter() {
+    const term = F.user.value.trim();
+    if (!term) {
+      userMatchIds = null;
+      render();
+      return;
+    }
+    try {
+      const end = term + "";
+      const ids = new Set();
+      for (const field of ["username", "displayName", "name"]) {
+        try {
+          const snap = await getDocs(
+            query(
+              collection(db, "users"),
+              orderBy(field),
+              where(field, ">=", term),
+              where(field, "<=", end),
+              limit(30)
+            )
+          );
+          snap.forEach((d) => ids.add(d.id));
+        } catch (_) {
+          /* field may not be indexed; try next */
+        }
+        if (ids.size) break;
+      }
+      userMatchIds = ids;
+    } catch (e) {
+      console.warn("[review] user search failed:", e.message || e);
+      userMatchIds = new Set(); // no matches rather than everything
+    }
+    render();
+  }
+
+  // ---- Wiring ----
+  document.getElementById("filterbox").addEventListener("input", (e) => {
+    saveFilters();
+    if (e.target === F.user) {
+      clearTimeout(userQueryTimer);
+      userQueryTimer = setTimeout(resolveUserFilter, 300);
+    } else {
+      render();
+    }
+  });
+  document.getElementById("filterbox").addEventListener("toggle", saveFilters);
+  document.getElementById("f-clear").addEventListener("click", () => {
+    fTypes.querySelectorAll("input:checked").forEach((c) => (c.checked = false));
+    F.from.value = F.to.value = F.dmin.value = F.dmax.value = F.user.value = "";
+    const any = fRegions.querySelector('input[value=""]');
+    if (any) any.checked = true;
+    userMatchIds = null;
+    saveFilters();
+    render();
+  });
+  moreBtn.addEventListener("click", async () => {
+    moreBtn.disabled = true;
+    moreBtn.textContent = "Loading…";
+    await loadPage();
+    render();
+    moreBtn.disabled = false;
+    moreBtn.textContent = "Load more";
+  });
+
+  await loadPage();
+  if (F.user.value.trim()) await resolveUserFilter();
+  render();
+</script>
+
+</body>
+</html>
