@@ -468,6 +468,28 @@ export function stripLeadingDate(name) {
   return cleaned.length >= 2 ? cleaned : s.trim();
 }
 
+// Rides store difficulty as a number (the iOS picker is 1..5);
+// verifiedTrails stores one of beginner/intermediate/advanced/expert.
+// Conservative mapping that errs on the safer side (2 -> intermediate,
+// not beginner) so we never advertise a non-trivial ride as a beginner
+// route. Returns null if there is no usable value — caller keeps the
+// HTML default (Intermediate).
+export function rideDifficultyToTrail(d) {
+  if (d == null) return null;
+  if (typeof d === "string") {
+    const s = d.toLowerCase().trim();
+    if (["beginner", "intermediate", "advanced", "expert"].includes(s)) {
+      return s;
+    }
+  }
+  const n = Number(d);
+  if (!Number.isFinite(n)) return null;
+  if (n <= 1) return "beginner";
+  if (n <= 3) return "intermediate";
+  if (n <= 4) return "advanced";
+  return "expert";
+}
+
 // Lightweight search-index projection of a trail. Stored in the separate
 // `trailIndex` collection (same doc id) so the Trails page can list/search
 // without ever downloading polylines. NEVER include the polyline here.
