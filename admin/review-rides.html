@@ -82,10 +82,12 @@
     formatDate, toMillis, escapeHtml,
     RIDE_TYPES, getUserDoc, userDisplayName, userAvatarRaw,
     resolvePhotoDisplayURL,
+    doc, getDoc, setDoc, arrayUnion, arrayRemove,
   } from "/admin/admin.js";
 
   const PAGE_SIZE = 50;
-  await guardPage("review-rides");
+  const { user } = await guardPage("review-rides");
+  const ADMIN_UID = user.uid;
   document.getElementById("boot").remove();
   document.getElementById("content").hidden = false;
 
@@ -173,18 +175,54 @@
   const publishedRideIds = new Set();
   const checkedRideIds = new Set();
 
-  // Per-admin hide list (this browser). Rides the admin is skipping.
+  // Per-admin hide list. Persisted in the admin's own users/{uid} doc so
+  // it syncs across devices (own-doc writes are allowed and don't touch
+  // the compPro guard — no rules change needed). localStorage is an
+  // instant cache + offline fallback.
   let hiddenSet = new Set();
   try {
     hiddenSet = new Set(JSON.parse(localStorage.getItem("bt_review_hidden") || "[]"));
   } catch (_) {}
-  function saveHidden() {
+  function updateHiddenCount() {
+    document.getElementById("hidden-count").textContent = String(hiddenSet.size);
+  }
+  function cacheHiddenLocal() {
     try {
       localStorage.setItem("bt_review_hidden", JSON.stringify([...hiddenSet]));
     } catch (_) {}
-    document.getElementById("hidden-count").textContent = String(hiddenSet.size);
   }
-  document.getElementById("hidden-count").textContent = String(hiddenSet.size);
+  async function setHidden(id, hide) {
+    if (hide) hiddenSet.add(id);
+    else hiddenSet.delete(id);
+    cacheHiddenLocal();
+    updateHiddenCount();
+    render();
+    try {
+      await setDoc(
+        doc(db, "users", ADMIN_UID),
+        { hiddenReviewRideIds: hide ? arrayUnion(id) : arrayRemove(id) },
+        { merge: true }
+      );
+    } catch (e) {
+      console.warn("[review] hide sync failed (kept locally):", e.message || e);
+    }
+  }
+  // Merge the cross-device list from the user doc on load.
+  (async () => {
+    try {
+      const s = await getDoc(doc(db, "users", ADMIN_UID));
+      const arr = (s.exists() && s.data().hiddenReviewRideIds) || [];
+      if (arr.length) {
+        arr.forEach((id) => hiddenSet.add(id));
+        cacheHiddenLocal();
+        updateHiddenCount();
+        render();
+      }
+    } catch (e) {
+      console.warn("[review] hide list load failed:", e.message || e);
+    }
+  })();
+  updateHiddenCount();
   const showHidden = () => document.getElementById("f-showhidden").checked;
 
   function rideStart(r) {
@@ -422,11 +460,7 @@
   ridesEl.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-act]");
     if (!btn) return;
-    const id = btn.dataset.id;
-    if (btn.dataset.act === "hide") hiddenSet.add(id);
-    else hiddenSet.delete(id);
-    saveHidden();
-    render();
+    setHidden(btn.dataset.id, btn.dataset.act === "hide");
   });
   document.getElementById("filterbox").addEventListener("toggle", saveFilters);
   document.getElementById("f-clear").addEventListener("click", () => {
