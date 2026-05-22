@@ -56,9 +56,10 @@
       </div>
       <div class="bt-row-actions">
         <button class="bt-btn bt-btn-ghost bt-btn-sm" id="f-clear" type="button">Clear filters</button>
+        <label class="bt-check" style="margin-left:auto"><input type="checkbox" id="f-showhidden"> Show hidden (<span id="hidden-count">0</span>)</label>
         <span class="bt-hint" id="f-count"></span>
       </div>
-      <p class="bt-hint">Filters apply to loaded rides — use “Load more” to search further back.</p>
+      <p class="bt-hint">Filters apply to loaded rides — use “Load more” to search further back. Published rides show a green check; hide ones you’re skipping.</p>
     </div>
   </details>
 
@@ -167,6 +168,25 @@
   const allDocs = []; // accumulated ride docs (snapshots' data + id)
   let userMatchIds = null; // Set of userIds matching the username filter, or null
 
+  // Which rides have already been promoted (a verifiedTrails doc exists with
+  // sourceRideId == ride.id), and which we've already checked.
+  const publishedRideIds = new Set();
+  const checkedRideIds = new Set();
+
+  // Per-admin hide list (this browser). Rides the admin is skipping.
+  let hiddenSet = new Set();
+  try {
+    hiddenSet = new Set(JSON.parse(localStorage.getItem("bt_review_hidden") || "[]"));
+  } catch (_) {}
+  function saveHidden() {
+    try {
+      localStorage.setItem("bt_review_hidden", JSON.stringify([...hiddenSet]));
+    } catch (_) {}
+    document.getElementById("hidden-count").textContent = String(hiddenSet.size);
+  }
+  document.getElementById("hidden-count").textContent = String(hiddenSet.size);
+  const showHidden = () => document.getElementById("f-showhidden").checked;
+
   function rideStart(r) {
     if (Number.isFinite(r.startLatitude) && Number.isFinite(r.startLongitude)) {
       return [r.startLatitude, r.startLongitude];
@@ -176,6 +196,7 @@
   }
 
   function passes(r) {
+    if (hiddenSet.has(r.id) && !showHidden()) return false;
     const f = currentFilters();
     if (f.types.length && !f.types.includes(r.rideType)) return false;
     const ms = toMillis(r.createdAt || r.startTime);
@@ -205,12 +226,14 @@
     const ft = Math.round(metersToFeet(Number(r.elevationGain) || 0));
     const priv = r.privacy === "friends" ? "Friends" : "Public";
     const uname = (r.__user && userDisplayName(r.__user)) || "…";
+    const isPub = publishedRideIds.has(r.id);
+    const isHidden = hiddenSet.has(r.id);
     return `
-      <div class="bt-row">
+      <div class="bt-row${isHidden ? " bt-row--hidden" : ""}">
         ${avatarHtml(r.userId, uname)}
         <div class="bt-row-icon">${rideTypeIcon(r.rideType)}</div>
         <div class="bt-row-main">
-          <div class="bt-row-title">${escapeHtml(r.trailName || r.name || "Untitled ride")}
+          <div class="bt-row-title">${isPub ? `<span class="bt-pubcheck" title="Published as a verified trail">✓</span> ` : ""}${escapeHtml(r.trailName || r.name || "Untitled ride")}
             <span class="bt-uname" data-uid="${escapeHtml(r.userId)}">· ${escapeHtml(uname)}</span></div>
           <div class="bt-row-meta">
             <span>${formatDate(r.createdAt || r.startTime)}</span>
@@ -218,10 +241,12 @@
             <span>${mi} mi</span>
             <span>${ft.toLocaleString()} ft gain</span>
             <span class="bt-badge bt-badge--source">${priv}</span>
+            ${isPub ? `<span class="bt-badge bt-badge--active">Published</span>` : ""}
           </div>
         </div>
         <div class="bt-row-actions">
-          <a class="bt-btn bt-btn-primary bt-btn-sm" href="/admin/review-ride.html?rideId=${encodeURIComponent(r.id)}">Review</a>
+          <a class="bt-btn bt-btn-primary bt-btn-sm" href="/admin/review-ride.html?rideId=${encodeURIComponent(r.id)}">${isPub ? "Re-review" : "Review"}</a>
+          <button type="button" class="bt-btn bt-btn-ghost bt-btn-sm" data-act="${isHidden ? "unhide" : "hide"}" data-id="${escapeHtml(r.id)}">${isHidden ? "Unhide" : "Hide"}</button>
         </div>
       </div>`;
   }
@@ -361,6 +386,29 @@
     render();
   }
 
+  // Mark which loaded rides already have a verifiedTrails doc
+  // (sourceRideId == ride.id). Chunked at 30 (Firestore "in" limit).
+  async function markPublished() {
+    const ids = allDocs.map((r) => r.id).filter((id) => !checkedRideIds.has(id));
+    if (!ids.length) return;
+    ids.forEach((id) => checkedRideIds.add(id));
+    try {
+      for (let i = 0; i < ids.length; i += 30) {
+        const chunk = ids.slice(i, i + 30);
+        const snap = await getDocs(
+          query(collection(db, "verifiedTrails"), where("sourceRideId", "in", chunk))
+        );
+        snap.forEach((d) => {
+          const sr = d.data().sourceRideId;
+          if (sr) publishedRideIds.add(sr);
+        });
+      }
+      render();
+    } catch (e) {
+      console.warn("[review] published-check skipped:", e.message || e);
+    }
+  }
+
   // ---- Wiring ----
   document.getElementById("filterbox").addEventListener("input", (e) => {
     saveFilters();
@@ -370,6 +418,15 @@
     } else {
       render();
     }
+  });
+  ridesEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (btn.dataset.act === "hide") hiddenSet.add(id);
+    else hiddenSet.delete(id);
+    saveHidden();
+    render();
   });
   document.getElementById("filterbox").addEventListener("toggle", saveFilters);
   document.getElementById("f-clear").addEventListener("click", () => {
@@ -386,6 +443,7 @@
     moreBtn.textContent = "Loading…";
     await loadPage();
     render();
+    markPublished();
     moreBtn.disabled = false;
     moreBtn.textContent = "Load more";
   });
@@ -393,6 +451,7 @@
   await loadPage();
   if (F.user.value.trim()) await resolveUserFilter();
   render();
+  markPublished();
 </script>
 
 </body>

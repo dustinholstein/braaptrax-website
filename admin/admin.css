@@ -376,6 +376,20 @@ body.bt-noscroll #route-tools {
   cursor: pointer;
 }
 .bt-check input { accent-color: var(--orange); }
+.bt-pubcheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #0A0A0A;
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.bt-row--hidden { opacity: 0.5; }
 
 .bt-avatar {
   flex: 0 0 auto;
