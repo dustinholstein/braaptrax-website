@@ -82,7 +82,7 @@
     formatDate, toMillis, escapeHtml,
     RIDE_TYPES, getUserDoc, userDisplayName, userAvatarRaw,
     resolvePhotoDisplayURL,
-    doc, getDoc, setDoc, arrayUnion, arrayRemove,
+    doc, setDoc, arrayUnion, arrayRemove, onSnapshot, showToast,
   } from "/admin/admin.js";
 
   const PAGE_SIZE = 50;
@@ -192,11 +192,13 @@
     } catch (_) {}
   }
   async function setHidden(id, hide) {
+    // Optimistic local update for instant feedback…
     if (hide) hiddenSet.add(id);
     else hiddenSet.delete(id);
     cacheHiddenLocal();
     updateHiddenCount();
     render();
+    // …then persist to the user doc (source of truth, syncs everywhere).
     try {
       await setDoc(
         doc(db, "users", ADMIN_UID),
@@ -204,24 +206,24 @@
         { merge: true }
       );
     } catch (e) {
-      console.warn("[review] hide sync failed (kept locally):", e.message || e);
+      console.error("[review] hide sync failed:", e);
+      showToast("Couldn't sync hide across devices: " + (e.message || e), "error");
     }
   }
-  // Merge the cross-device list from the user doc on load.
-  (async () => {
-    try {
-      const s = await getDoc(doc(db, "users", ADMIN_UID));
-      const arr = (s.exists() && s.data().hiddenReviewRideIds) || [];
-      if (arr.length) {
-        arr.forEach((id) => hiddenSet.add(id));
-        cacheHiddenLocal();
-        updateHiddenCount();
-        render();
-      }
-    } catch (e) {
-      console.warn("[review] hide list load failed:", e.message || e);
-    }
-  })();
+
+  // Live cross-device sync: the user doc is authoritative. Any hide/unhide
+  // (this device or another) updates the set and re-renders in real time.
+  onSnapshot(
+    doc(db, "users", ADMIN_UID),
+    (snap) => {
+      const arr = (snap.exists() && snap.data().hiddenReviewRideIds) || [];
+      hiddenSet = new Set(arr);
+      cacheHiddenLocal();
+      updateHiddenCount();
+      render();
+    },
+    (e) => console.warn("[review] hide list subscription error:", e.message || e)
+  );
   updateHiddenCount();
   const showHidden = () => document.getElementById("f-showhidden").checked;
 
